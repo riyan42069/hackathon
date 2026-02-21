@@ -1,73 +1,75 @@
-# hackathon
-
 # 🩺 MedTrack AI — Smart Medication Tracker & Preventive Health Assistant
 
-## 🚀 Hackathon Project (24-Hour Build)
+<div align="center">
+  <img src="https://img.shields.io/badge/Status-Hackathon_Build-blue.svg?style=for-the-badge" alt="Hackathon Build">
+  <img src="https://img.shields.io/badge/Platform-React_Native-61DAFB.svg?style=for-the-badge&logo=react" alt="React Native">
+  <img src="https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=for-the-badge&logo=firebase" alt="Firebase">
+</div>
 
-**MedTrack AI** is an intelligent medication tracking application designed to help users manage medicines safely through **smart scanning, automated reminders, inventory tracking, and proactive alerts**.
-
-The app reduces missed doses, expired medications, and medication mismanagement by combining **mobile AI scanning**, **automation**, and real-time health reminders.
+<p align="center">
+  <b>A 24-Hour Hackathon Project</b><br>
+  <i>Empowering users to manage their medications safely through smart scanning, automated reminders, inventory tracking, and proactive alerts.</i>
+</p>
 
 ---
 
 ## 🎯 Problem Statement
 
-Medication mismanagement leads to:
+Medication mismanagement is a growing health concern that leads to:
+- 📉 Missed and skipped doses
+- ⚠️ Consumption of expired medicines
+- 💊 Incorrect dosage tracking and overmedication
+- 🏥 Poor chronic disease management
+- 🚨 Increased healthcare risks and hospitalizations
 
-- Missed doses
-- Expired medicine usage
-- Incorrect dosage tracking
-- Poor chronic disease management
-- Increased healthcare risks
-
-Many users — especially elderly patients and chronic care patients — struggle to manually track medications.
+Many users—especially elderly individuals and patients with chronic conditions—struggle to manually track complex medication schedules.
 
 ---
 
-## 💡 Solution
+## 💡 Our Solution
 
-MedTrack AI acts as a **digital medication assistant** that:
+**MedTrack AI** acts as a reliable, digital medication assistant that automates the tracking process:
 
-✅ Scans medicines using camera  
-✅ Extracts medication information automatically  
-✅ Tracks stock and expiry dates  
-✅ Sends intelligent reminders  
-✅ Detects missed medications  
-✅ Alerts users before medicines run out  
+- ✅ **Smart Scanning:** Scans medicines using the mobile device camera.
+- ✅ **Auto-extraction:** Extracts medication information automatically using OCR and barcode parsing.
+- ✅ **Inventory Management:** Tracks stock levels and expiry dates.
+- ✅ **Intelligent Reminders:** Sends scheduled and escalating reminders.
+- ✅ **Missed Dose Detection:** Detects delays and logs medication intake.
+- ✅ **Proactive Alerts:** Warns users and caretakers before medicines run out.
 
 ---
 
 ## ✨ Main Features
 
 ### 📷 Medicine Scanner
-- Scan medicine barcode using camera
-- OCR fallback to read medicine labels
-- Auto-fill medication details
-- User confirmation before saving
+- Scan medicine barcodes instantly.
+- OCR fallback technology to read and parse medicine labels.
+- Auto-fill medication details to minimize manual entry.
+- User confirmation step before saving.
 
 ### 💊 Medication Management
-- Add medicine name, dosage, and frequency
-- Store expiry date
-- Track pill inventory
-- View medication history
+- Seamlessly add medicine name, dosage, and frequency.
+- Store and track expiry dates.
+- Keep a real-time tally of pill inventory.
+- View a comprehensive medication history.
 
 ### ⏰ Smart Reminders
-- Scheduled dose notifications
-- Daily medication alerts
-- Missed dose detection
-- One-tap **Taken / Skip** logging
+- Reliable, offline-first scheduled dose notifications.
+- Daily medication alerts tailored to the user's schedule.
+- Missed dose detection and recording.
+- One-tap **Taken / Skip** logging directly from the notification.
 
 ### ⚠️ Intelligent Alerts
-- Expiry warnings (30d / 7d / 1d)
-- Low stock alerts
-- Missing medication alerts
-- Reminder escalation
+- Expiry warnings triggered at **30 days, 7 days, and 1 day**.
+- Low stock alerts when inventory hits defined thresholds.
+- Missing medication alerts escalated to caregivers (e.g., notifying a nurse if a dose is delayed).
+- General reminder escalation for repeated omissions.
 
-### 📊 Dashboard
-- Today’s medication schedule
-- Upcoming doses
-- Adherence tracking
-- Alert center
+### 📊 Comprehensive Dashboard
+- Today’s personalized medication schedule.
+- Timeline of upcoming doses.
+- Health adherence tracking and analytics.
+- Centralized Alert Center.
 
 ---
 
@@ -75,199 +77,178 @@ MedTrack AI acts as a **digital medication assistant** that:
 
 ```mermaid
 graph TD
-    A[Mobile App - Expo/React Native] --> B{Action}
+    A[Mobile App - Expo / React Native] --> B{Action}
     B -->|Scan| C[Camera & Barcode API]
     B -->|Schedule| D[Local Notification Engine]
     
     A <--> E[Firebase Suite]
     subgraph Cloud Backend
-    E --- F[(Firestore NoSQL)]
-    E --- G[Anonymous Auth]
+        E --- F[(Firestore NoSQL)]
+        E --- G[Anonymous Auth]
     end
 
     subgraph Logic Layers
-    C --> H[OCR/Data Parsing]
-    H --> F
-    F --> D
+        C --> H[OCR / Data Parsing]
+        H --> F
+        F --> D
     end
-
+```
 
 ---
 
 ## 🛠️ Tech Stack
 
-### 📱 Frontend
-- React Native
-- Expo
-- Expo Go (Live Demo)
-- JavaScript / TypeScript
-
-### 📷 Scanning & AI
-- expo-camera
-- expo-barcode-scanner
-- OCR processing (ML Kit / text parsing)
-
-### ☁️ Backend
-- Firebase Firestore
-- Firebase Authentication (Anonymous Login)
-
-### 🔔 Notifications
-- expo-notifications (Local notifications)
-
-### 🗃️ State Management
-- React Context API (or Zustand)
+- **📱 Frontend:** React Native, Expo, Expo Go (Live Demo), TypeScript / JavaScript
+- **📷 Scanning & AI:** `expo-camera`, `expo-barcode-scanner`, ML Kit OCR / Text Parsing
+- **☁️ Backend:** Firebase Firestore, Firebase Authentication (Anonymous Login)
+- **🔔 Notifications:** `expo-notifications` (Offline-first local notifications)
+- **🗃️ State Management:** React Context API (or Zustand)
 
 ---
 
-## 🗂️ Database Structure (Firestore)
+## 🗂️ Database Structure (Firestore NoSQL)
 
-### users
-userId
-createdAt
+<details open>
+<summary><b>View Schema Definitions</b></summary>
 
+### `users`
+| Field | Type | Description |
+|---|---|---|
+| `userId` | `string` | Unique identifier generated by Firebase Auth |
+| `createdAt` | `timestamp` | Account creation date |
 
-### medications
+### `medications`
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique document ID |
+| `name` | `string` | Name of the medicine |
+| `dosage` | `string` | Prescribed dosage (e.g., 500mg) |
+| `expiryDate` | `timestamp` | Expiration date |
+| `totalQuantity` | `number` | Total pills initially added |
+| `remainingQuantity` | `number` | Current stock |
+| `barcodeId` | `string` | Captured barcode |
+| `imageUrl` | `string` | Reference image URL |
 
-id
-name
-dosage
-expiryDate
-totalQuantity
-remainingQuantity
-barcodeId
-imageUrl
+### `schedules`
+| Field | Type | Description |
+|---|---|---|
+| `medicationId` | `string` | Reference to the medication |
+| `doseTimes` | `array` | List of scheduled intake times (e.g., ['08:00', '20:00']) |
+| `startDate` | `timestamp` | Schedule start |
+| `endDate` | `timestamp` | Schedule end |
 
+### `dose_logs`
+| Field | Type | Description |
+|---|---|---|
+| `medicationId` | `string` | Reference to the medication |
+| `scheduledTime` | `timestamp` | When it was supposed to be taken |
+| `status` | `string` | Enum: `taken` or `missed` |
+| `timestamp` | `timestamp` | Exact time the action was logged |
 
-### schedules
-
-medicationId
-doseTimes[]
-startDate
-endDate
-
-
-### dose_logs
-
-medicationId
-scheduledTime
-status (taken/missed)
-timestamp
-
+</details>
 
 ---
 
 ## 🔄 App Workflow
 
-1. User scans medicine
-2. App extracts medication details
-3. User confirms information
-4. User sets schedule and inventory
-5. App schedules reminders
-6. User logs medication intake
-7. System updates stock and triggers alerts
+1. **Scan:** User scans their medicine bottle or box.
+2. **Extract:** App parses formulation and extracts medication details.
+3. **Verify:** User confirms the auto-filled information.
+4. **Schedule:** User sets the intake schedule and current inventory constraints.
+5. **Remind:** App schedules offline local reminders.
+6. **Log:** User logs medication intake via push notifications.
+7. **Update:** System updates stock in Firestore and triggers alerts if necessary.
 
 ---
 
 ## 👥 Team Structure (4 Members)
 
-| Role | Responsibility |
-|------|----------------|
-| Dev 1 | Scanner + Camera Integration |
-| Dev 2 | Scheduling & Notifications |
-| Dev 3 | Inventory & Alert Logic |
-| Dev 4 | UI/UX + Dashboard + Integration |
+| Role | Primary Responsibility |
+|------|------------------------|
+| **Dev 1** | Scanner + Camera Integration & ML processing |
+| **Dev 2** | Local Scheduling & Push Notification Engine |
+| **Dev 3** | Inventory State Management & Alert Logic |
+| **Dev 4** | UI/UX, Dashboard Creation, & Firebase Integration |
 
 ---
 
 ## ⏱️ Development Timeline (24 Hours)
 
-### Phase 1 — Setup (2 hrs)
-- Expo project setup
-- Firebase integration
-- Navigation structure
-
-### Phase 2 — Core Features (10 hrs)
-- Scanner implementation
-- Add medication flow
-- Scheduling system
-
-### Phase 3 — Logic (6 hrs)
-- Reminder notifications
-- Inventory tracking
-- Alert rules
-
-### Phase 4 — Polish (6 hrs)
-- Dashboard UI
-- Demo optimization
-- Bug fixes
+- **Phase 1 — Setup (2 hrs):** Expo project setup, Firebase integration, Base navigation structure.
+- **Phase 2 — Core Features (10 hrs):** Scanner implementation, Adding medication flow, Scheduling robust system.
+- **Phase 3 — Logic Layer (6 hrs):** Reminder listeners, Inventory counting, Alert rules formulation.
+- **Phase 4 — Polish & Presentation (6 hrs):** Dashboard UI overhaul, Demo optimization, QA & Bug fixes.
 
 ---
 
-## 🧠 Alert Logic
+## 🧠 Core Alert Logic Code Snippets
 
-### Dose Reminder
+```javascript
+// Dose Reminder
+if (currentTime === scheduledDose) {
+  sendNotification();
+}
 
-if currentTime === scheduledDose:
-sendNotification()
+// Missed Medication Escalation
+if (timeSinceScheduled > 30 * MINUTES && !log.taken) {
+  markAsMissed();
+  notifyUser();
+  notifyNurse(); // Escalated alert
+}
 
+// Low Stock Alert
+if (remainingQuantity <= threshold) {
+  notifyUserLowStock();
+}
 
-### Missed Medication
-
-if not taken within 30 minutes:
-mark missed
-notify user
-notify nerse
-
-
-### Low Stock Alert
-if remainingQuantity <= threshold:
-notify user
-
-
-### Expiry Alert
-
-if daysToExpiry <= 30:
-send warning
-
+// Expiry Alert
+if (daysToExpiry <= 30) {
+  sendExpiryWarning();
+}
+```
 
 ---
 
-## 🔒 Privacy Considerations
+## 🔒 Privacy & Security Considerations
 
-- Minimal personal data stored
-- Local notifications work offline
-- No sensitive medical records stored externally
+- **Minimal Data:** Only strictly necessary, non-identifiable data is stored in the Firebase cloud.
+- **Anonymous Auth:** Users can start tracking immediately without providing email or passwords.
+- **Offline First:** Local notifications function entirely offline.
+- **No PHI Storage:** No sensitive medical records are required or stored externally, complying with generic usage policies.
 
 ---
 
 ## 🎥 Demo Flow (For Judges)
 
-1. Scan medicine
-2. Auto-fill details
-3. Set reminder
-4. Receive notification
-5. Mark as taken
-6. Show inventory decrease
-7. Trigger low-stock alert
+1. **Capture:** Scan a medicine barcode live.
+2. **Process:** Show auto-filled details extracting accurate data.
+3. **Set:** Set a reminder for +1 minute into the future.
+4. **Alert:** Receive the scheduled push notification.
+5. **Action:** Mark the medicine as "taken" straight from the UI.
+6. **Analytics:** Show the real-time inventory decrease on the dashboard.
+7. **Edge Cases:** Manually trigger a low-stock or expiry alert to demonstrate proactive safety features.
 
 ---
 
-## 🧑‍💻 Installation
+## 🧑‍💻 Quickstart & Installation
+
+Ensure you have **Node.js** and the **Expo CLI** installed. Download the [Expo Go](https://expo.dev/client) app on your Android or iOS device.
 
 ```bash
+# Clone the repository
 git clone https://github.com/your-team/medtrack-ai
 cd medtrack-ai
+
+# Install dependencies
 npm install
+
+# Start the Expo development server
 npx expo start
+```
 
-Open the QR code using Expo Go on your mobile device.
+*Open the Expo Go app and scan the generated QR code to live preview the application!*
 
-✅ Requirements
-
-Node.js
-
-Expo CLI
-
-Expo Go App (Android/iOS)
-
-Firebase Project
+<div align="center">
+  <br/>
+  <sub>Built with ❤️ during a 24-hour hackathon.</sub>
+</div>
