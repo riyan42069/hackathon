@@ -72,16 +72,24 @@ MedTrack AI acts as a **digital medication assistant** that:
 ---
 
 ## 🧱 System Architecture
-React Native App (Expo)
-│
-├── Expo Camera (Scanning)
-├── Barcode Scanner
-│
-├── Firebase Backend
-│ ├── Firestore Database
-│ └── Authentication
-│
-└── Local Notification Engine
+
+```mermaid
+graph TD
+    A[Mobile App - Expo/React Native] --> B{Action}
+    B -->|Scan| C[Camera & Barcode API]
+    B -->|Schedule| D[Local Notification Engine]
+    
+    A <--> E[Firebase Suite]
+    subgraph Cloud Backend
+    E --- F[(Firestore NoSQL)]
+    E --- G[Anonymous Auth]
+    end
+
+    subgraph Logic Layers
+    C --> H[OCR/Data Parsing]
+    H --> F
+    F --> D
+    end
 
 
 ---
