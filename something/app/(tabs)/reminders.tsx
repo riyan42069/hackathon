@@ -1,9 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '../../services/firebase';
+import { subscribeToPatients } from '../../services/patients';
+import { auth } from '../../services/firebase'; 
+import { scheduleMedicationReminder } from '../../services/notifications'; 
+
+// --- Types & Interfaces ---
+type ReminderStatus = 'upcoming' | 'done' | 'missed';
 
 interface Medicine {
   name: string;
@@ -12,6 +16,7 @@ interface Medicine {
   daysPerWeekToTakeThePrescription: string;
   pillSchedule: string;
   refillOrNot: boolean;
+  status?: ReminderStatus; 
 }
 
 interface Patient {
@@ -20,21 +25,27 @@ interface Patient {
   medicines?: Medicine[];
 }
 
-interface ReminderItem {
+interface UnifiedReminder {
   id: string;
   patient: string;
   medicine: string;
-  schedule: string;
-  pillsPerDay: string;
-  refillNeeded: boolean;
-  group: 'Morning' | 'Afternoon' | 'Evening' | 'Other';
+  dosage: string;
+  time: string;
+  status: ReminderStatus;
+  urgent: boolean;
+  group: GroupType; 
 }
 
-function getGroup(schedule: string): 'Morning' | 'Afternoon' | 'Evening' | 'Other' {
+// --- Helper Functions ---
+type GroupType = 'Action Needed' | 'Morning' | 'Afternoon' | 'Evening' | 'Other';
+
+function getGroup(schedule: string, refillNeeded: boolean): GroupType {
+  if (refillNeeded) return 'Action Needed';
   if (!schedule) return 'Other';
   const s = schedule.toUpperCase();
   const amMatch = s.match(/(\d+)(?::\d+)?\s*AM/);
   const pmMatch = s.match(/(\d+)(?::\d+)?\s*PM/);
+  
   if (amMatch) return 'Morning';
   if (pmMatch) {
     const hour = parseInt(pmMatch[1], 10);
@@ -46,54 +57,97 @@ function getGroup(schedule: string): 'Morning' | 'Afternoon' | 'Evening' | 'Othe
   return 'Other';
 }
 
-const GROUP_CONFIG: { key: 'Morning' | 'Afternoon' | 'Evening' | 'Other'; icon: any; label: string }[] = [
+const GROUP_CONFIG: { key: GroupType; icon: any; label: string }[] = [
+  { key: 'Action Needed', icon: 'alert-circle-outline', label: 'Action Needed: Refill' },
   { key: 'Morning',   icon: 'sunny-outline',        label: 'Morning' },
-  { key: 'Afternoon', icon: 'partly-sunny-outline',  label: 'Afternoon' },
-  { key: 'Evening',   icon: 'moon-outline',          label: 'Evening' },
-  { key: 'Other',     icon: 'time-outline',          label: 'Other' },
+  { key: 'Afternoon', icon: 'partly-sunny-outline', label: 'Afternoon' },
+  { key: 'Evening',   icon: 'moon-outline',         label: 'Evening' },
+  { key: 'Other',     icon: 'time-outline',         label: 'Other' },
 ];
 
+function statusStyle(status: ReminderStatus) {
+  switch (status) {
+    case 'done':     return { bg: '#E8F5E9', text: '#2E7D32', label: 'Done' };
+    case 'missed':   return { bg: '#FFEBEE', text: '#C62828', label: 'Missed' };
+    case 'upcoming': return { bg: '#EBF4FF', text: '#007AFF', label: 'Upcoming' };
+  }
+}
+
+function parseTimeToToday(timeStr: string): Date {
+  if (!timeStr) return new Date();
+  const cleanStr = timeStr.replace(/\s+/g, '').toUpperCase();
+  const match = cleanStr.match(/(\d+):(\d+)(AM|PM)?/);
+  if (!match) return new Date();
+
+  let hrs = parseInt(match[1], 10) || 0;
+  const mins = parseInt(match[2], 10) || 0;
+  const modifier = match[3];
+  
+  if (modifier === 'PM' && hrs < 12) hrs += 12;
+  if (modifier === 'AM' && hrs === 12) hrs = 0;
+
+  const date = new Date();
+  date.setHours(hrs, mins, 0, 0);
+  return date;
+}
+
+// --- Main Component ---
 export default function RemindersScreen() {
-  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [reminders, setReminders] = useState<UnifiedReminder[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!db) return;
-    const q = query(collection(db, 'patients'), orderBy('name'));
-    const unsub = onSnapshot(q, (snapshot) => {
-      const items: ReminderItem[] = [];
-      snapshot.forEach((doc) => {
-        const data = doc.data() as Patient;
-        const meds: Medicine[] = data.medicines || [];
-        meds.forEach((m, i) => {
+    const unsubscribe = subscribeToPatients((patientsData: any[]) => {
+      const now = new Date();
+      const items: UnifiedReminder[] = [];
+
+      patientsData.forEach((p: Patient) => {
+        const meds: Medicine[] = p.medicines || [];
+        meds.forEach((m, index) => {
+          let currentStatus: ReminderStatus = m.status || 'upcoming';
+          if (currentStatus !== 'done' && m.pillSchedule) {
+            const reminderTime = parseTimeToToday(m.pillSchedule);
+            if (now > reminderTime) currentStatus = 'missed';
+          }
+
           items.push({
-            id: `${doc.id}-${i}`,
-            patient: data.name,
-            medicine: m.name,
-            schedule: m.pillSchedule || '',
-            pillsPerDay: m.pillsPerDayToBeTaken || '1',
-            refillNeeded: m.refillOrNot,
-            group: getGroup(m.pillSchedule),
+            id: `${p.id}-med-${index}`,
+            patient: p.name || 'Unknown Patient',
+            medicine: m.name || 'Unknown Med',
+            dosage: `${m.pillsPerDayToBeTaken || 1}x daily`,
+            time: m.pillSchedule || '',
+            status: currentStatus,
+            urgent: m.refillOrNot === true,
+            group: getGroup(m.pillSchedule || '', m.refillOrNot === true), 
           });
         });
       });
       setReminders(items);
       setLoading(false);
     });
-    return () => unsub();
+    return () => unsubscribe();
   }, []);
+
+  const handleSyncAlarms = async () => {
+    if (reminders.length === 0) {
+      Alert.alert("No Reminders", "Add a patient first.");
+      return;
+    }
+    for (const r of reminders) {
+      await scheduleMedicationReminder(r.patient, r.medicine, r.time);
+    }
+    Alert.alert("Sync Successful", "Alarms scheduled! Check console for mock logs.");
+  };
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const total = reminders.length;
-  const refill = reminders.filter(r => r.refillNeeded).length;
+  const upcoming = reminders.filter(r => r.status === 'upcoming').length;
+  const missed = reminders.filter(r => r.status === 'missed').length;
+  const refill = reminders.filter(r => r.urgent).length;
 
   if (loading) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Reminders</Text>
-          <Text style={styles.headerDate}>{today}</Text>
-        </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
         </View>
@@ -104,18 +158,28 @@ export default function RemindersScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Reminders</Text>
-        <Text style={styles.headerDate}>{today}</Text>
+        <View style={styles.headerTopRow}>
+          <View>
+            <Text style={styles.headerTitle}>Reminders</Text>
+            <Text style={styles.headerDate}>{today}</Text>
+          </View>
+          <TouchableOpacity style={styles.syncButton} onPress={handleSyncAlarms}>
+            <Ionicons name="sync-outline" size={18} color="#007AFF" />
+            <Text style={styles.syncText}>Sync Alarms</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.summaryRow}>
-        {([
-          [String(total),  '#1C1C1E', 'Total'],
-          [String(refill), '#FF9500', 'Refill'],
-        ] as [string, string, string][]).map(([num, color, label]) => (
-          <View key={label} style={styles.summaryCard}>
-            <Text style={[styles.summaryNumber, { color }]}>{num}</Text>
-            <Text style={styles.summaryLabel}>{label}</Text>
+        {[
+          [total, '#1C1C1E', 'Total'],
+          [upcoming, '#007AFF', 'Upcoming'],
+          [missed, '#FF3B30', 'Missed'],
+          [refill, '#FF9500', 'Refill'],
+        ].map(([num, color, label]) => (
+          <View key={label as string} style={styles.summaryCard}>
+            <Text style={[styles.summaryNumber, { color: color as string }]}>{num as number}</Text>
+            <Text style={styles.summaryLabel}>{label as string}</Text>
           </View>
         ))}
       </View>
@@ -124,13 +188,13 @@ export default function RemindersScreen() {
         <View style={styles.emptyContainer}>
           <Ionicons name="alarm-outline" size={48} color="#C7C7CC" />
           <Text style={styles.emptyText}>No reminders yet</Text>
-          <Text style={styles.emptySubText}>Add patients with medicine schedules to see reminders here</Text>
         </View>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
           {GROUP_CONFIG.map(({ key, icon, label }) => {
-            const group = reminders.filter(r => r.group === key);
-            if (group.length === 0) return null;
+            const groupReminders = reminders.filter(r => r.group === key);
+            if (groupReminders.length === 0) return null;
+
             return (
               <View key={key}>
                 <View style={styles.sectionHeader}>
@@ -138,32 +202,41 @@ export default function RemindersScreen() {
                   <Text style={styles.sectionTitle}>{label}</Text>
                 </View>
                 <View style={styles.cardsList}>
-                  {group.map((r) => (
-                    <View key={r.id} style={[styles.reminderCard, r.refillNeeded && styles.reminderCardUrgent]}>
-                      <View style={styles.reminderLeft}>
-                        <View style={[styles.pillIcon, { backgroundColor: r.refillNeeded ? '#FFF3E0' : '#EBF4FF' }]}>
-                          <Ionicons name="medical-outline" size={20} color={r.refillNeeded ? '#FF9500' : '#007AFF'} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <View style={styles.reminderTopRow}>
-                            <Text style={styles.medicineName}>{r.medicine}</Text>
-                            {r.refillNeeded && (
-                              <View style={styles.lowStockBadge}>
-                                <Text style={styles.lowStockText}>REFILL</Text>
+                  {groupReminders.map((r) => {
+                    const s = statusStyle(r.status);
+                    return (
+                      <TouchableOpacity 
+                        key={r.id} 
+                        activeOpacity={0.7}
+                        style={[styles.reminderCard, r.urgent && styles.reminderCardUrgent]}
+                        onPress={() => Alert.alert("Reminder", `${r.medicine} for ${r.patient}`)}
+                      >
+                        <View style={styles.reminderLeft}>
+                          <View style={[styles.pillIcon, { backgroundColor: s.bg }]}>
+                            <Ionicons name="medical-outline" size={20} color={s.text} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <View style={styles.reminderTopRow}>
+                              <Text style={styles.medicineName}>{r.medicine}</Text>
+                              {r.urgent && (
+                                <View style={styles.lowStockBadge}><Text style={styles.lowStockText}>REFILL</Text></View>
+                              )}
+                            </View>
+                            <Text style={styles.dosageText}>{r.dosage} · {r.patient}</Text>
+                            {r.time && (
+                              <View style={styles.timeRow}>
+                                <Ionicons name="time-outline" size={13} color="#8E8E93" />
+                                <Text style={styles.timeText}>{r.time}</Text>
                               </View>
                             )}
                           </View>
-                          <Text style={styles.dosageText}>{r.pillsPerDay}x daily · {r.patient}</Text>
-                          {r.schedule ? (
-                            <View style={styles.timeRow}>
-                              <Ionicons name="time-outline" size={13} color="#8E8E93" />
-                              <Text style={styles.timeText}>{r.schedule}</Text>
-                            </View>
-                          ) : null}
                         </View>
-                      </View>
-                    </View>
-                  ))}
+                        <View style={[styles.statusBadge, { backgroundColor: s.bg }]}>
+                          <Text style={[styles.statusText, { color: s.text }]}>{s.label}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             );
@@ -175,18 +248,62 @@ export default function RemindersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F2F2F7' },
-  header: { backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
-  headerTitle: { fontSize: 28, fontWeight: '800', color: '#1C1C1E', letterSpacing: -0.5 },
-  headerDate: { fontSize: 14, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#F2F2F7' 
+  },
+  header: { 
+    backgroundColor: '#fff', 
+    paddingHorizontal: 20, 
+    paddingVertical: 16, 
+    borderBottomWidth: 1, 
+    borderBottomColor: '#F2F2F7' 
+  },
+  
+  headerTopRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center',
+    width: '100%' 
+  },
+  headerTitle: { 
+    fontSize: 28, 
+    fontWeight: '800', 
+    color: '#1C1C1E', 
+    letterSpacing: -0.5 
+  },
+  headerDate: { 
+    fontSize: 14, 
+    color: '#8E8E93', 
+    fontWeight: '500', 
+    marginTop: 2 
+  },
+  syncButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#007AFF', // Solid blue so it's easier to see
+    paddingHorizontal: 15, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    gap: 6,
+    elevation: 3, // Android shadow
+    shadowColor: '#000', // iOS shadow
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
+  syncText: { 
+    color: '#fff', // White text on blue button
+    fontWeight: '700', 
+    fontSize: 13 
+  },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   summaryRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 16, gap: 10 },
   summaryCard: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
   summaryNumber: { fontSize: 22, fontWeight: '800' },
   summaryLabel: { fontSize: 10, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5, marginTop: 2 },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 10 },
+  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 10, marginTop: 40 },
   emptyText: { fontSize: 18, fontWeight: '700', color: '#8E8E93' },
-  emptySubText: { fontSize: 14, color: '#C7C7CC', textAlign: 'center', lineHeight: 20 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 20, marginBottom: 10, marginTop: 8 },
   sectionTitle: { fontSize: 13, fontWeight: '700', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.8 },
   cardsList: { paddingHorizontal: 20, gap: 10, marginBottom: 8 },
@@ -201,4 +318,6 @@ const styles = StyleSheet.create({
   dosageText: { fontSize: 13, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
   timeRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
   timeText: { fontSize: 12, color: '#8E8E93', fontWeight: '600' },
+  statusBadge: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  statusText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.3 },
 });
