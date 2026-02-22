@@ -9,14 +9,17 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { MedicineAutocomplete } from '../components/MedicineAutocomplete';
+import { generatePatientSummary, translateAndDraftEmail } from '../services/ai';
+import Markdown from 'react-native-markdown-display';
+import * as MailComposer from 'expo-mail-composer';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const PILLS_PER_DAY_OPTIONS = [1, 2, 3, 4, 5, 6];
 const DAYS_PER_WEEK_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 const TIME_OPTIONS = [
-  '5:00 AM','6:00 AM','7:00 AM','8:00 AM','9:00 AM','10:00 AM','11:00 AM',
-  '12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM',
-  '6:00 PM','7:00 PM','8:00 PM','9:00 PM','10:00 PM',
+  '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+  '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM',
+  '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM',
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -114,6 +117,13 @@ export default function PatientProfileScreen() {
   const [refillOrNot, setRefillOrNot] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // AI Report State
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportText, setReportText] = useState('');
+  const [originalReport, setOriginalReport] = useState('');
+  const [reportLanguage, setReportLanguage] = useState('English');
+  const [generatingReport, setGeneratingReport] = useState(false);
+
   useEffect(() => {
     if (!id || !db) return;
     const unsub = onSnapshot(doc(db, 'patients', id), (snap) => {
@@ -172,6 +182,77 @@ export default function PatientProfileScreen() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleGenerateReport = async () => {
+    if (!patient) return;
+    setReportModalVisible(true);
+    setGeneratingReport(true);
+    setReportText('');
+    setOriginalReport('');
+    setReportLanguage('English');
+
+    try {
+      const summary = await generatePatientSummary(patient);
+      setReportText(summary);
+      setOriginalReport(summary);
+    } catch (err: any) {
+      console.error(err);
+      setReportText("Failed to generate report: " + err.message);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const handleTranslate = async (lang: string) => {
+    if (lang === 'English') {
+      setReportText(originalReport);
+      setReportLanguage('English');
+      return;
+    }
+
+    setGeneratingReport(true);
+    setReportLanguage(lang);
+    try {
+      const translated = await translateAndDraftEmail(originalReport, lang);
+      setReportText(translated);
+    } catch (err: any) {
+      Alert.alert("Translation Error", err.message);
+      setReportLanguage('English');
+      setReportText(originalReport);
+    } finally {
+      setGeneratingReport(false);
+    }
+  };
+
+  const handleEmailReport = async () => {
+    const isAvailable = await MailComposer.isAvailableAsync();
+    if (!isAvailable) {
+      Alert.alert("Mail Unavailable", "We cannot open the Mail app on this device.");
+      return;
+    }
+
+    const recipients = [];
+    if (patient?.email) recipients.push(patient.email);
+
+    if (patient?.emergencyContact) {
+      const emails = patient.emergencyContact.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi);
+      if (emails) {
+        recipients.push(...emails);
+      } else if (patient.emergencyContact.includes('@')) {
+        recipients.push(patient.emergencyContact.trim());
+      }
+    }
+
+    if (recipients.length === 0) {
+      Alert.alert("Notice", "No emails found for this patient, but opening draft anyway.");
+    }
+
+    await MailComposer.composeAsync({
+      recipients,
+      subject: `Clinical Summary Report - ${patient?.name || 'Patient'}`,
+      body: reportText, // Includes markdown which may not be perfect in plain-text email, but good enough for demo!
+    });
   };
 
   if (loading) {
@@ -246,18 +327,28 @@ export default function PatientProfileScreen() {
 
       {activeTab === 'profile' ? (
         <ScrollView contentContainerStyle={{ padding: 20, gap: 12, paddingBottom: 40 }}>
+
+          <TouchableOpacity
+            style={styles.generateReportBtn}
+            activeOpacity={0.8}
+            onPress={handleGenerateReport}
+          >
+            <Ionicons name="document-text-outline" size={20} color="#fff" />
+            <Text style={styles.generateReportText}>Generate AI Summary Report</Text>
+          </TouchableOpacity>
+
           <View style={styles.infoCard}>
-            <InfoRow icon="calendar-outline"     label="Date of Birth"     value={patient.dob || ''} />
+            <InfoRow icon="calendar-outline" label="Date of Birth" value={patient.dob || ''} />
             <View style={styles.divider} />
-            <InfoRow icon="person-outline"       label="Gender"            value={patient.gender || ''} />
+            <InfoRow icon="person-outline" label="Gender" value={patient.gender || ''} />
             <View style={styles.divider} />
-            <InfoRow icon="resize-outline"       label="Height"            value={patient.height || ''} />
+            <InfoRow icon="resize-outline" label="Height" value={patient.height || ''} />
             <View style={styles.divider} />
-            <InfoRow icon="barbell-outline"      label="Weight"            value={patient.weight || ''} />
+            <InfoRow icon="barbell-outline" label="Weight" value={patient.weight || ''} />
             <View style={styles.divider} />
-            <InfoRow icon="call-outline"         label="Phone"             value={patient.phone || ''} />
+            <InfoRow icon="call-outline" label="Phone" value={patient.phone || ''} />
             <View style={styles.divider} />
-            <InfoRow icon="mail-outline"         label="Email"             value={patient.email || ''} />
+            <InfoRow icon="mail-outline" label="Email" value={patient.email || ''} />
             <View style={styles.divider} />
             <InfoRow icon="alert-circle-outline" label="Emergency Contact" value={patient.emergencyContact || ''} />
           </View>
@@ -274,7 +365,7 @@ export default function PatientProfileScreen() {
             <View style={styles.statsRow}>
               {([
                 [String(medicines.length), '#1C1C1E', 'Total'],
-                [String(refillCount),      '#FF9500', 'Refill'],
+                [String(refillCount), '#FF9500', 'Refill'],
               ] as [string, string, string][]).map(([n, c, l]) => (
                 <View key={l} style={styles.statCard}>
                   <Text style={[styles.statNumber, { color: c }]}>{n}</Text>
@@ -412,77 +503,147 @@ export default function PatientProfileScreen() {
 
         </ScrollView>
       </Modal>
+
+      {/* AI Report Modal */}
+      <Modal visible={reportModalVisible} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setReportModalVisible(false)} style={{ flex: 1 }}>
+            <Text style={styles.cancelButton}>Close</Text>
+          </TouchableOpacity>
+          <Text style={[styles.modalTitle, { flex: 2, textAlign: 'center' }]}>Clinical Summary</Text>
+          <TouchableOpacity onPress={handleEmailReport} style={{ flex: 1, alignItems: 'flex-end', opacity: reportText && !generatingReport ? 1 : 0.5 }} disabled={!reportText || generatingReport}>
+            <Ionicons name="paper-plane-outline" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        </View>
+
+        {reportText && originalReport ? (
+          <View style={styles.langSelector}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 20 }}>
+              {['English', 'Spanish', 'French', 'Hindi', 'Arabic'].map(lang => (
+                <TouchableOpacity
+                  key={lang}
+                  style={[mStyles.chip, reportLanguage === lang && mStyles.chipActive]}
+                  onPress={() => handleTranslate(lang)}
+                  disabled={generatingReport}
+                >
+                  <Text style={[mStyles.chipText, reportLanguage === lang && mStyles.chipTextActive]}>{lang}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        <ScrollView style={styles.reportContainer} contentContainerStyle={{ paddingBottom: 60, paddingTop: 10 }}>
+          {generatingReport ? (
+            <View style={{ alignItems: 'center', marginTop: 40, gap: 16 }}>
+              <ActivityIndicator size="large" color="#007AFF" />
+              <Text style={{ color: '#8E8E93', fontSize: 16, fontWeight: '500' }}>
+                Analyzing patient profile...
+              </Text>
+            </View>
+          ) : (
+            <Markdown style={markdownStyles}>
+              {reportText}
+            </Markdown>
+          )}
+        </ScrollView>
+      </Modal>
+
     </SafeAreaView>
   );
 }
 
 // ─── Modal form styles ────────────────────────────────────────────────────────
 const mStyles = StyleSheet.create({
-  form:          { padding: 20, backgroundColor: '#F2F2F7' },
-  sectionHeading:{ fontSize: 11, fontWeight: '800', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 8 },
-  input:         { backgroundColor: '#fff', height: 50, borderRadius: 10, paddingHorizontal: 16, fontSize: 16, borderWidth: 1, borderColor: '#E5E5EA', marginBottom: 4 },
-  chipsRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  chip:          { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, backgroundColor: '#F2F2F7', borderWidth: 1.5, borderColor: '#E5E5EA' },
-  chipActive:    { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  chipText:      { fontSize: 14, fontWeight: '600', color: '#3C3C43' },
-  chipTextActive:{ color: '#fff' },
-  doseLabel:     { fontSize: 12, fontWeight: '700', color: '#007AFF', marginBottom: 6 },
-  timeRow:       { gap: 6, paddingVertical: 2 },
-  timeChip:      { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, backgroundColor: '#F2F2F7', borderWidth: 1.5, borderColor: '#E5E5EA' },
-  timeChipActive:{ backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  timeChipText:  { fontSize: 12, fontWeight: '600', color: '#3C3C43' },
+  form: { padding: 20, backgroundColor: '#F2F2F7' },
+  sectionHeading: { fontSize: 11, fontWeight: '800', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 14, marginBottom: 8 },
+  input: { backgroundColor: '#fff', height: 50, borderRadius: 10, paddingHorizontal: 16, fontSize: 16, borderWidth: 1, borderColor: '#E5E5EA', marginBottom: 4 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  chip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, backgroundColor: '#F2F2F7', borderWidth: 1.5, borderColor: '#E5E5EA' },
+  chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipText: { fontSize: 14, fontWeight: '600', color: '#3C3C43' },
+  chipTextActive: { color: '#fff' },
+  doseLabel: { fontSize: 12, fontWeight: '700', color: '#007AFF', marginBottom: 6 },
+  timeRow: { gap: 6, paddingVertical: 2 },
+  timeChip: { paddingHorizontal: 11, paddingVertical: 6, borderRadius: 14, backgroundColor: '#F2F2F7', borderWidth: 1.5, borderColor: '#E5E5EA' },
+  timeChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  timeChipText: { fontSize: 12, fontWeight: '600', color: '#3C3C43' },
   timeChipTextActive: { color: '#fff' },
-  switchRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E5E5EA' },
-  switchLabel:   { fontSize: 15, color: '#1C1C1E', fontWeight: '500' },
+  switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#E5E5EA' },
+  switchLabel: { fontSize: 15, color: '#1C1C1E', fontWeight: '500' },
 });
 
 // ─── Main styles ──────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:           { flex: 1, backgroundColor: '#F2F2F7' },
-  header:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
-  backButton:          { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  backText:            { fontSize: 16, fontWeight: '600', color: '#007AFF' },
-  loadingContainer:    { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  patientBanner:       { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
-  patientAvatarWrapper:{ position: 'relative' },
-  patientAvatar:       { width: 54, height: 54, borderRadius: 16, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
-  patientAvatarText:   { fontSize: 22, fontWeight: '800', color: '#007AFF' },
-  patientName:         { fontSize: 18, fontWeight: '800', color: '#1C1C1E' },
-  patientMeta:         { fontSize: 12, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
-  tabBar:              { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
-  tab:                 { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive:           { borderBottomColor: '#007AFF' },
-  tabText:             { fontSize: 15, fontWeight: '600', color: '#8E8E93' },
-  tabTextActive:       { color: '#007AFF', fontWeight: '700' },
-  infoCard:            { backgroundColor: '#fff', borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  infoRow:             { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  infoIconBox:         { width: 32, height: 32, borderRadius: 9, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
-  infoLabel:           { fontSize: 11, color: '#8E8E93', fontWeight: '600', letterSpacing: 0.3 },
-  infoValue:           { fontSize: 15, color: '#1C1C1E', fontWeight: '700', marginTop: 1 },
-  divider:             { height: 1, backgroundColor: '#F2F2F7', marginLeft: 60 },
-  notesCard:           { backgroundColor: '#fff', borderRadius: 18, padding: 16, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  notesLabel:          { fontSize: 11, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.6 },
-  notesText:           { fontSize: 14, color: '#3C3C43', fontWeight: '500', lineHeight: 22 },
-  statsRow:            { flexDirection: 'row', gap: 10 },
-  statCard:            { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
-  statNumber:          { fontSize: 22, fontWeight: '800' },
-  statLabel:           { fontSize: 10, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5, marginTop: 2 },
-  emptyMeds:           { alignItems: 'center', paddingVertical: 40, gap: 10 },
-  emptyMedsText:       { fontSize: 16, color: '#8E8E93', fontWeight: '600' },
-  medCard:             { backgroundColor: '#fff', borderRadius: 18, padding: 16, gap: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
-  medCardRefill:       { borderWidth: 1.5, borderColor: '#FF9500' },
-  medHeader:           { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  medIconBox:          { width: 46, height: 46, borderRadius: 13, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
-  medName:             { fontSize: 16, fontWeight: '700', color: '#1C1C1E' },
-  medDosage:           { fontSize: 13, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
-  refillBadge:         { backgroundColor: '#FFF3E0', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  refillBadgeText:     { fontSize: 10, fontWeight: '800', color: '#FF9500', letterSpacing: 0.4 },
-  medDetails:          { gap: 6, paddingLeft: 58 },
-  detailRow:           { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  detailText:          { fontSize: 13, color: '#3C3C43', fontWeight: '500' },
-  fab:                 { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 16, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#007AFF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
-  modalHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA', paddingTop: 60 },
-  modalTitle:          { fontSize: 18, fontWeight: '600' },
-  cancelButton:        { fontSize: 17, color: '#007AFF' },
-  saveButton:          { fontSize: 17, fontWeight: '600', color: '#007AFF' },
+  container: { flex: 1, backgroundColor: '#F2F2F7' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  backButton: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  backText: { fontSize: 16, fontWeight: '600', color: '#007AFF' },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  patientBanner: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#fff', paddingHorizontal: 20, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  patientAvatarWrapper: { position: 'relative' },
+  patientAvatar: { width: 54, height: 54, borderRadius: 16, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
+  patientAvatarText: { fontSize: 22, fontWeight: '800', color: '#007AFF' },
+  patientName: { fontSize: 18, fontWeight: '800', color: '#1C1C1E' },
+  patientMeta: { fontSize: 12, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
+  tabBar: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  tab: { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tabActive: { borderBottomColor: '#007AFF' },
+  tabText: { fontSize: 15, fontWeight: '600', color: '#8E8E93' },
+  tabTextActive: { color: '#007AFF', fontWeight: '700' },
+  infoCard: { backgroundColor: '#fff', borderRadius: 18, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
+  infoIconBox: { width: 32, height: 32, borderRadius: 9, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
+  infoLabel: { fontSize: 11, color: '#8E8E93', fontWeight: '600', letterSpacing: 0.3 },
+  infoValue: { fontSize: 15, color: '#1C1C1E', fontWeight: '700', marginTop: 1 },
+  divider: { height: 1, backgroundColor: '#F2F2F7', marginLeft: 60 },
+  notesCard: { backgroundColor: '#fff', borderRadius: 18, padding: 16, gap: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  notesLabel: { fontSize: 11, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.6 },
+  notesText: { fontSize: 14, color: '#3C3C43', fontWeight: '500', lineHeight: 22 },
+  statsRow: { flexDirection: 'row', gap: 10 },
+  statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 14, padding: 12, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
+  statNumber: { fontSize: 22, fontWeight: '800' },
+  statLabel: { fontSize: 10, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5, marginTop: 2 },
+  emptyMeds: { alignItems: 'center', paddingVertical: 40, gap: 10 },
+  emptyMedsText: { fontSize: 16, color: '#8E8E93', fontWeight: '600' },
+  medCard: { backgroundColor: '#fff', borderRadius: 18, padding: 16, gap: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
+  medCardRefill: { borderWidth: 1.5, borderColor: '#FF9500' },
+  medHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  medIconBox: { width: 46, height: 46, borderRadius: 13, backgroundColor: '#EBF4FF', alignItems: 'center', justifyContent: 'center' },
+  medName: { fontSize: 16, fontWeight: '700', color: '#1C1C1E' },
+  medDosage: { fontSize: 13, color: '#8E8E93', fontWeight: '500', marginTop: 2 },
+  refillBadge: { backgroundColor: '#FFF3E0', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  refillBadgeText: { fontSize: 10, fontWeight: '800', color: '#FF9500', letterSpacing: 0.4 },
+  medDetails: { gap: 6, paddingLeft: 58 },
+  detailRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  detailText: { fontSize: 13, color: '#3C3C43', fontWeight: '500' },
+  fab: { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 16, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#007AFF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA', paddingTop: 60 },
+  modalTitle: { fontSize: 18, fontWeight: '600' },
+  cancelButton: { fontSize: 17, color: '#007AFF' },
+  saveButton: { fontSize: 17, fontWeight: '600', color: '#007AFF' },
+  generateReportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', paddingVertical: 14, borderRadius: 14, gap: 8, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  generateReportText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  reportContainer: { flex: 1, backgroundColor: '#FAFAFC', padding: 20 },
+  langSelector: { paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
+});
+
+// ─── Markdown Styles ──────────────────────────────────────────────────────────
+const markdownStyles = StyleSheet.create({
+  body: {
+    fontSize: 16,
+    color: '#3C3C43',
+    lineHeight: 24,
+    fontFamily: 'System',
+  },
+  heading1: { fontSize: 24, fontWeight: '800', color: '#1C1C1E', marginTop: 16, marginBottom: 12, borderBottomWidth: 1, borderBottomColor: '#E5E5EA', paddingBottom: 6 },
+  heading2: { fontSize: 20, fontWeight: '700', color: '#1C1C1E', marginTop: 16, marginBottom: 8 },
+  heading3: { fontSize: 18, fontWeight: '700', color: '#007AFF', marginTop: 12, marginBottom: 6 },
+  strong: { fontWeight: '700', color: '#1C1C1E' },
+  em: { fontStyle: 'italic', color: '#8E8E93' },
+  bullet_list: { marginTop: 6, marginBottom: 16 },
+  list_item: { marginBottom: 6 },
+  bullet_list_icon: { color: '#007AFF', fontSize: 20, marginTop: 2 },
+  paragraph: { marginBottom: 14 },
+  code_inline: { backgroundColor: '#F2F2F7', color: '#FF3B30', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, fontFamily: 'System' },
 });

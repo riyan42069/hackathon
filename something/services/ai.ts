@@ -117,3 +117,85 @@ Return ONLY a valid JSON object matching this schema. If a value is not mentione
 
     return JSON.parse(content);
 }
+
+export async function generatePatientSummary(patientData: any): Promise<string> {
+    if (!GROQ_API_KEY) {
+        throw new Error("Missing EXPO_PUBLIC_GROQ_API_KEY in .env");
+    }
+
+    const systemPrompt = `
+You are an expert Chief Medical Officer and an elite Medical Scribe.
+Write a comprehensive, highly detailed, and professional Clinical Summary Report using the provided patient JSON data.
+You MUST use beautiful Markdown formatting to structure the report (Headers like ###, bold text **like this** for emphasis, bullet points, and newlines).
+Organize it into these sections:
+- 📌 Executive Summary
+- 👤 Patient Demographics & Vitals
+- 💊 Medication Regimen & Adherence
+- ⚠️ Alerts & Clinical Insights (Highlight if they have high pill counts, missing info, low stock alerts, etc.)
+
+Be highly analytical, thoroughly explain the patient's status, and make it look visually stunning.
+`;
+
+    console.log("Asking Llama 3.3 70B on Groq to generate report...");
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Patient Data: ${JSON.stringify(patientData)}` }
+            ],
+            temperature: 0.3,
+        }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result.error?.message || "Failed to generate AI report.");
+    }
+
+    return result.choices[0].message.content.trim();
+}
+
+export async function translateAndDraftEmail(report: string, targetLanguage: string): Promise<string> {
+    if (!GROQ_API_KEY) {
+        throw new Error("Missing EXPO_PUBLIC_GROQ_API_KEY in .env");
+    }
+
+    const systemPrompt = `
+You are a highly skilled medical translator. The user will provide a clinical summary report.
+You must translate the ENTIRE report precisely and accurately into ${targetLanguage}.
+Do not change the medical facts, but make sure the translation sounds professional in ${targetLanguage}.
+Format your response in beautiful Markdown, just like the original report.
+`;
+
+    console.log(`Asking Llama 3.3 70B on Groq to translate to ${targetLanguage}...`);
+
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+            model: 'llama-3.3-70b-versatile',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Original Report:\n\n${report}` }
+            ],
+            temperature: 0.1,
+        }),
+    });
+
+    const result = await response.json();
+    if (!response.ok) {
+        throw new Error(result.error?.message || "Failed to translate report.");
+    }
+
+    return result.choices[0].message.content.trim();
+}
