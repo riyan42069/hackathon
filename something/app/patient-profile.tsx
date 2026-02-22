@@ -29,6 +29,7 @@ interface Medicine {
   indication?: string;
   classification?: string;
   totalPillsPrescribed: string;
+  pillsLeft?: number;
   pillsPerDayToBeTaken: string;
   daysPerWeekToTakeThePrescription: string;
   pillSchedule: string;
@@ -155,6 +156,7 @@ export default function PatientProfileScreen() {
       category: medCategory, dosageForm: medDosageForm, strength: medStrength,
       manufacturer: medManufacturer, indication: medIndication, classification: medClassification,
       totalPillsPrescribed: totalPills,
+      pillsLeft: parseInt(totalPills, 10) || 0,
       pillsPerDayToBeTaken: String(pillsPerDay),
       daysPerWeekToTakeThePrescription: String(daysPerWeek),
       pillSchedule: pillSchedules.filter(Boolean).join(', '),
@@ -171,6 +173,23 @@ export default function PatientProfileScreen() {
       Alert.alert('Error', 'Could not save medicine.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTakePill = async (medIdx: number) => {
+    if (!patient) return;
+    const meds = [...(patient.medicines || [])];
+    const med = meds[medIdx];
+    const currentLeft = med.pillsLeft ?? (parseInt(med.totalPillsPrescribed, 10) || 0);
+    if (currentLeft <= 0) {
+      Alert.alert('No Pills Left', `${med.name} has no pills remaining.`);
+      return;
+    }
+    meds[medIdx] = { ...med, pillsLeft: currentLeft - 1 };
+    try {
+      await updateDoc(doc(db, 'patients', id as string), { medicines: meds });
+    } catch (e) {
+      Alert.alert('Error', 'Could not update pill count.');
     }
   };
 
@@ -289,44 +308,70 @@ export default function PatientProfileScreen() {
                 <Text style={styles.emptyMedsText}>No medicines added yet</Text>
               </View>
             ) : (
-              medicines.map((med, idx) => (
-                <View key={idx} style={[styles.medCard, med.refillOrNot && styles.medCardRefill]}>
-                  <View style={styles.medHeader}>
-                    <View style={styles.medIconBox}>
-                      <Ionicons name="medical-outline" size={22} color="#007AFF" />
+              medicines.map((med, idx) => {
+                const pillsLeft = med.pillsLeft ?? (parseInt(med.totalPillsPrescribed, 10) || 0);
+                const totalPills = parseInt(med.totalPillsPrescribed, 10) || 0;
+                const pct = totalPills > 0 ? (pillsLeft / totalPills) * 100 : 0;
+                const barColor = pct > 30 ? '#34C759' : pct > 10 ? '#FF9500' : '#FF3B30';
+
+                return (
+                  <View key={idx} style={[styles.medCard, med.refillOrNot && styles.medCardRefill]}>
+                    <View style={styles.medHeader}>
+                      <View style={styles.medIconBox}>
+                        <Ionicons name="medical-outline" size={22} color="#007AFF" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.medName}>{med.name}</Text>
+                        <Text style={styles.medDosage}>{med.pillsPerDayToBeTaken} pill(s)/day</Text>
+                      </View>
+                      {med.refillOrNot && (
+                        <View style={styles.refillBadge}>
+                          <Text style={styles.refillBadgeText}>REFILL</Text>
+                        </View>
+                      )}
                     </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.medName}>{med.name}</Text>
-                      <Text style={styles.medDosage}>{med.pillsPerDayToBeTaken} pill(s)/day</Text>
+
+                    {/* Pills left progress */}
+                    <View style={styles.pillsLeftSection}>
+                      <View style={styles.pillsLeftHeader}>
+                        <Text style={styles.pillsLeftLabel}>Pills Remaining</Text>
+                        <Text style={[styles.pillsLeftCount, { color: barColor }]}>{pillsLeft} / {totalPills}</Text>
+                      </View>
+                      <View style={styles.progressBar}>
+                        <View style={[styles.progressFill, { width: `${pct}%`, backgroundColor: barColor }]} />
+                      </View>
                     </View>
-                    {med.refillOrNot && (
-                      <View style={styles.refillBadge}>
-                        <Text style={styles.refillBadgeText}>REFILL</Text>
-                      </View>
-                    )}
+
+                    {/* Take pill button */}
+                    <TouchableOpacity
+                      style={[styles.takePillButton, pillsLeft <= 0 && styles.takePillButtonDisabled]}
+                      activeOpacity={0.7}
+                      onPress={() => handleTakePill(idx)}
+                      disabled={pillsLeft <= 0}
+                    >
+                      <Ionicons name="remove-circle-outline" size={18} color={pillsLeft > 0 ? '#fff' : '#C7C7CC'} />
+                      <Text style={[styles.takePillText, pillsLeft <= 0 && styles.takePillTextDisabled]}>
+                        {pillsLeft > 0 ? 'Take Pill' : 'No Pills Left'}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={styles.medDetails}>
+                      {med.pillSchedule ? (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="time-outline" size={14} color="#8E8E93" />
+                          <Text style={styles.detailText}>{med.pillSchedule}</Text>
+                        </View>
+                      ) : null}
+                      {med.daysPerWeekToTakeThePrescription ? (
+                        <View style={styles.detailRow}>
+                          <Ionicons name="calendar-outline" size={14} color="#8E8E93" />
+                          <Text style={styles.detailText}>{med.daysPerWeekToTakeThePrescription} day(s) per week</Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
-                  <View style={styles.medDetails}>
-                    {med.pillSchedule ? (
-                      <View style={styles.detailRow}>
-                        <Ionicons name="time-outline" size={14} color="#8E8E93" />
-                        <Text style={styles.detailText}>{med.pillSchedule}</Text>
-                      </View>
-                    ) : null}
-                    {med.totalPillsPrescribed ? (
-                      <View style={styles.detailRow}>
-                        <Ionicons name="layers-outline" size={14} color="#8E8E93" />
-                        <Text style={styles.detailText}>Total prescribed: {med.totalPillsPrescribed} pills</Text>
-                      </View>
-                    ) : null}
-                    {med.daysPerWeekToTakeThePrescription ? (
-                      <View style={styles.detailRow}>
-                        <Ionicons name="calendar-outline" size={14} color="#8E8E93" />
-                        <Text style={styles.detailText}>{med.daysPerWeekToTakeThePrescription} day(s) per week</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-              ))
+                );
+              })
             )}
           </ScrollView>
 
@@ -478,6 +523,16 @@ const styles = StyleSheet.create({
   refillBadge:         { backgroundColor: '#FFF3E0', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
   refillBadgeText:     { fontSize: 10, fontWeight: '800', color: '#FF9500', letterSpacing: 0.4 },
   medDetails:          { gap: 6, paddingLeft: 58 },
+  pillsLeftSection:    { gap: 6 },
+  pillsLeftHeader:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  pillsLeftLabel:      { fontSize: 12, fontWeight: '600', color: '#8E8E93' },
+  pillsLeftCount:      { fontSize: 14, fontWeight: '800' },
+  progressBar:         { height: 6, borderRadius: 3, backgroundColor: '#F2F2F7', overflow: 'hidden' },
+  progressFill:        { height: 6, borderRadius: 3 },
+  takePillButton:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#007AFF', borderRadius: 10, paddingVertical: 10 },
+  takePillButtonDisabled: { backgroundColor: '#F2F2F7' },
+  takePillText:        { fontSize: 14, fontWeight: '700', color: '#fff' },
+  takePillTextDisabled:{ color: '#C7C7CC' },
   detailRow:           { flexDirection: 'row', alignItems: 'center', gap: 6 },
   detailText:          { fontSize: 13, color: '#3C3C43', fontWeight: '500' },
   fab:                 { position: 'absolute', bottom: 24, right: 20, width: 56, height: 56, borderRadius: 16, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#007AFF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 14, elevation: 8 },
