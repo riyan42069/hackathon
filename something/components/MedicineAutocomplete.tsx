@@ -7,9 +7,16 @@ interface Props {
   onSelect: (name: string) => void;
   onSelectFull: (info: MedicineInfo) => void;
   inputStyle?: any;
+  onChangeText?: (text: string) => void;
 }
 
-export function MedicineAutocomplete({ value, onSelect, onSelectFull, inputStyle }: Props) {
+export function MedicineAutocomplete({ 
+  value, 
+  onSelect, 
+  onSelectFull, 
+  inputStyle, 
+  onChangeText // 1. Destructure the missing prop
+}: Props) {
   const [focused, setFocused] = useState(false);
   const didSelectRef = useRef(false);
 
@@ -18,30 +25,36 @@ export function MedicineAutocomplete({ value, onSelect, onSelectFull, inputStyle
     : [];
 
   const handleBlur = () => {
+    // 2. Increased delay slightly for slower devices
     setTimeout(() => {
       setFocused(false);
-      if (!didSelectRef.current) {
-        const valid = MEDICINES.some(m => m.name.toLowerCase() === value.toLowerCase());
-        if (!valid) onSelect('');
-      }
+      // Removed the logic that clears the input on blur (onSelect(''))
+      // because it prevents users from entering custom/new meds.
       didSelectRef.current = false;
-    }, 200);
+    }, 300);
   };
 
   const handleSelect = (info: MedicineInfo) => {
     didSelectRef.current = true;
     onSelect(info.name);
     onSelectFull(info);
+    // 3. Trigger onChangeText if provided to sync parent state
+    if (onChangeText) onChangeText(info.name); 
     setFocused(false);
   };
 
   return (
-    <View>
+    <View style={{ zIndex: 1000 }}>
       <TextInput
         style={inputStyle}
         placeholder="Name of medicine"
         value={value}
-        onChangeText={(v) => { didSelectRef.current = false; onSelect(v); }}
+        // 4. Use both local onSelect and the passed onChangeText
+        onChangeText={(v) => { 
+          didSelectRef.current = false; 
+          onSelect(v); 
+          if (onChangeText) onChangeText(v); 
+        }}
         onFocus={() => setFocused(true)}
         onBlur={handleBlur}
         autoCorrect={false}
@@ -53,7 +66,8 @@ export function MedicineAutocomplete({ value, onSelect, onSelectFull, inputStyle
             <TouchableOpacity
               key={info.name}
               style={styles.item}
-              onPressIn={() => handleSelect(info)}
+              // 5. Use onPress instead of onPressIn for better reliability inside Modals
+              onPress={() => handleSelect(info)} 
               activeOpacity={0.7}
             >
               <Text style={styles.itemName}>{info.name}</Text>
