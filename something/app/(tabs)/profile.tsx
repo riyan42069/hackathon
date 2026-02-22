@@ -1,20 +1,10 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { signOut } from 'firebase/auth';
+import { signOut, onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from '../../services/firebase';
-
-const USER = {
-  name: 'Dr. Sarah Smith',
-  id: 'MED-00421',
-  role: 'Medical Officer',
-  email: 'sarah.smith@hospital.com',
-  phone: '+1 (555) 012-3456',
-  department: 'Internal Medicine',
-  hospital: 'City General Hospital',
-};
 
 function SettingRow({ icon, label, value, danger = false, onPress }: { icon: any; label: string; value?: string; danger?: boolean; onPress?: () => void }) {
   return (
@@ -33,6 +23,12 @@ function SettingRow({ icon, label, value, danger = false, onPress }: { icon: any
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsub();
+  }, []);
 
   function handleSignOut() {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -46,6 +42,10 @@ export default function ProfileScreen() {
     ]);
   }
 
+  const email = user?.email || '';
+  const avatarLetter = email.charAt(0).toUpperCase() || '?';
+  const shortId = user?.uid ? user.uid.slice(0, 8).toUpperCase() : '—';
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -55,28 +55,18 @@ export default function ProfileScreen() {
         <View style={styles.avatarSection}>
           <View style={styles.avatarWrapper}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>S</Text>
+              <Text style={styles.avatarText}>{avatarLetter}</Text>
             </View>
-            <TouchableOpacity style={styles.avatarEdit}>
-              <Ionicons name="camera-outline" size={14} color="#fff" />
-            </TouchableOpacity>
           </View>
-          <Text style={styles.userName}>{USER.name}</Text>
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>{USER.role}</Text>
-          </View>
-          <Text style={styles.userId}>ID: {USER.id}</Text>
+          <Text style={styles.userName}>{email}</Text>
+          <Text style={styles.userId}>ID: {shortId}</Text>
         </View>
 
-        <Text style={styles.sectionLabel}>CONTACT INFORMATION</Text>
+        <Text style={styles.sectionLabel}>ACCOUNT INFORMATION</Text>
         <View style={styles.card}>
-          <SettingRow icon="mail-outline" label="Email" value={USER.email} />
+          <SettingRow icon="mail-outline" label="Email" value={email} />
           <View style={styles.divider} />
-          <SettingRow icon="call-outline" label="Phone" value={USER.phone} />
-          <View style={styles.divider} />
-          <SettingRow icon="business-outline" label="Hospital" value={USER.hospital} />
-          <View style={styles.divider} />
-          <SettingRow icon="medkit-outline" label="Department" value={USER.department} />
+          <SettingRow icon="finger-print-outline" label="User ID" value={shortId} />
         </View>
 
         <Text style={styles.sectionLabel}>SETTINGS</Text>
@@ -84,8 +74,6 @@ export default function ProfileScreen() {
           <SettingRow icon="notifications-outline" label="Notifications" />
           <View style={styles.divider} />
           <SettingRow icon="lock-closed-outline" label="Change Password" />
-          <View style={styles.divider} />
-          <SettingRow icon="shield-checkmark-outline" label="Privacy & Security" />
         </View>
 
         <Text style={styles.sectionLabel}>ACCOUNT</Text>
@@ -107,10 +95,7 @@ const styles = StyleSheet.create({
   avatarWrapper: { position: 'relative', marginBottom: 4 },
   avatar: { width: 90, height: 90, borderRadius: 28, backgroundColor: '#007AFF', alignItems: 'center', justifyContent: 'center', shadowColor: '#007AFF', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 14, elevation: 6 },
   avatarText: { fontSize: 38, fontWeight: '800', color: '#fff' },
-  avatarEdit: { position: 'absolute', bottom: -4, right: -4, width: 28, height: 28, borderRadius: 14, backgroundColor: '#0055D4', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#F2F2F7' },
-  userName: { fontSize: 22, fontWeight: '800', color: '#1C1C1E', letterSpacing: -0.3 },
-  roleBadge: { backgroundColor: '#EBF4FF', borderRadius: 20, paddingHorizontal: 12, paddingVertical: 4 },
-  roleText: { fontSize: 13, fontWeight: '700', color: '#007AFF' },
+  userName: { fontSize: 18, fontWeight: '700', color: '#1C1C1E', letterSpacing: -0.3 },
   userId: { fontSize: 13, color: '#8E8E93', fontWeight: '600' },
   sectionLabel: { fontSize: 11, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.8, paddingHorizontal: 20, marginBottom: 8, marginTop: 4 },
   card: { backgroundColor: '#fff', borderRadius: 18, marginHorizontal: 20, marginBottom: 20, overflow: 'hidden', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 },
