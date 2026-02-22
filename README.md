@@ -1,75 +1,71 @@
-# 🩺 MedTrack AI — Smart Medication Tracker & Preventive Health Assistant
+# 🩺 Diagnostic Assistant AI — Intelligent Clinical Scribe & EMR Bridge
 
 <div align="center">
   <img src="https://img.shields.io/badge/Status-Hackathon_Build-blue.svg?style=for-the-badge" alt="Hackathon Build">
   <img src="https://img.shields.io/badge/Platform-React_Native-61DAFB.svg?style=for-the-badge&logo=react" alt="React Native">
+  <img src="https://img.shields.io/badge/AI-Groq__Whisper_-FF4F00.svg?style=for-the-badge" alt="Groq API">
   <img src="https://img.shields.io/badge/Backend-Firebase-FFCA28.svg?style=for-the-badge&logo=firebase" alt="Firebase">
 </div>
 
 <p align="center">
-  <b>A 24-Hour Hackathon Project</b><br>
-  <i>Empowering users to manage their medications safely through smart scanning, automated reminders, inventory tracking, and proactive alerts.</i>
+  <b>A Diagnostic Assistant</b><br>
+  <i>Capturing conversations between patients and clinicians, and translating them into structured data, accurate diagnoses, and helpful, understandable insights.</i>
 </p>
 
 ---
 
 ## 🎯 Problem Statement
+In fast-paced medical environments, clinicians spend extensive amounts of time documenting consultations, leading to burnout and reduced patient face-time. Additionally, medical jargon and complex reports often leave patients confused about their recovery plans. 
 
-Medication mismanagement is a growing health concern that leads to:
-- 📉 Missed and skipped doses
-- ⚠️ Consumption of expired medicines
-- 💊 Incorrect dosage tracking and overmedication
-- 🏥 Poor chronic disease management
-- 🚨 Increased healthcare risks and hospitalizations
-
-Many users—especially elderly individuals and patients with chronic conditions—struggle to manually track complex medication schedules.
+Mountains of unstructured conversational data need to be captured accurately and distilled down into concise, helpful, and easily integratable EMR content.
 
 ---
 
 ## 💡 Our Solution
+**Diagnostic Assistant AI** serves as an intelligent bridge between raw clinical conversations and structured medical records. 
 
-**MedTrack AI** acts as a reliable, digital medication assistant that automates the tracking process:
+Through advanced AI and high-speed Speech-to-Text inference, the application listens to consultations and:
+1. **Transcribes** dictations and interviews perfectly.
+2. **Extracts** structured data (vitals, symptoms, medications).
+3. **Generates** professional Clinical Summary Reports.
+4. **Translates** medical jargon into patient-friendly, multilingual recovery plans.
 
-- ✅ **Smart Scanning:** Scans medicines using the mobile device camera.
-- ✅ **Auto-extraction:** Extracts medication information automatically using OCR and barcode parsing.
-- ✅ **Inventory Management:** Tracks stock levels and expiry dates.
-- ✅ **Intelligent Reminders:** Sends scheduled and escalating reminders.
-- ✅ **Missed Dose Detection:** Detects delays and logs medication intake.
-- ✅ **Proactive Alerts:** Warns users and caretakers before medicines run out.
+This guarantees faster documentation and higher compliance, effectively acting as an elite Medical Scribe.
 
 ---
 
-## ✨ Main Features
+## ✨ Key Implementation Areas
 
-### 📷 Medicine Scanner
-- Scan medicine barcodes instantly.
-- OCR fallback technology to read and parse medicine labels.
-- Auto-fill medication details to minimize manual entry.
-- User confirmation step before saving.
+### 🎙️ 1. Speech-to-Text Engine
+- Powered by the ultra-fast **Groq API** utilizing the **Whisper-Large-v3** model.
+- Converts clinician dictation or patient interviews into flawless text transcripts in real-time.
+- Highly resilient to background noise and varying accents during dictation.
 
-### 💊 Medication Management
-- Seamlessly add medicine name, dosage, and frequency.
-- Store and track expiry dates.
-- Keep a real-time tally of pill inventory.
-- View a comprehensive medication history.
+### 🧠 2. AI-Powered Summarization
+- Leverages **Llama 3.3 70B** to intelligently extract key vitals, symptoms, and diagnoses directly from standard document text and conversational transcripts.
+- Auto-populates a structured JSON schema, effortlessly isolating patient demographics from medical regimens.
 
-### ⏰ Smart Reminders
-- Reliable, offline-first scheduled dose notifications.
-- Daily medication alerts tailored to the user's schedule.
-- Missed dose detection and recording.
-- One-tap **Taken / Skip** logging directly from the notification.
+### ⚕️ 3. ICD Code Mapping & Suggested Treatments
+- The AI autonomously analyzes the chief complaints to map conditions to relevant clinical structures.
+- Generates fully populated medication adherence plans, including suggested dosages, pill schedules, and refill necessities based on the transcript's context.
 
-### ⚠️ Intelligent Alerts
-- Expiry warnings triggered at **30 days, 7 days, and 1 day**.
-- Low stock alerts when inventory hits defined thresholds.
-- Missing medication alerts escalated to caregivers (e.g., notifying a nurse if a dose is delayed).
-- General reminder escalation for repeated omissions.
+### 📝 4. Patient-Friendly Summaries
+- Automatically formats generated clinical data into beautiful, readable Markdown reports.
+- **Multilingual Support:** The application translates complex medical jargon into the patient's native language, creating an understandable recovery plan they can actually use.
+- Allows seamless **Email Sharing** of translated reports directly to patients and emergency contacts.
 
-### 📊 Comprehensive Dashboard
-- Today’s personalized medication schedule.
-- Timeline of upcoming doses.
-- Health adherence tracking and analytics.
-- Centralized Alert Center.
+### 🔌 5. Integration with Existing EMRs
+- Outputs a neatly structured JSON payload containing cleanly separated objects (`demographics`, `medicines`, `notes`).
+- Operates as a lightweight API-based model that can be instantly plugged into large-scale hospital EMR solutions without messy data wrangling.
+
+---
+
+## 🚀 Use Cases
+- ⏱️ **Faster documentation during consultations:** Let the AI scribe while the doctor focuses on the patient.
+- 📞 **Telehealth transcription and diagnosis support:** Perfect for online appointments requiring instant note-taking.
+- 🚨 **Emergency room triage documentation:** Rapid data extraction during high-stress encounters.
+- 🌍 **Multilingual support for diverse patient populations:** Break down language barriers and ensure patient comprehension.
+- 🛡️ **Compliance and audit-ready records generation:** Keep comprehensive and legally compliant records formatted identically every time.
 
 ---
 
@@ -77,9 +73,9 @@ Many users—especially elderly individuals and patients with chronic conditions
 
 ```mermaid
 graph TD
-    A[Mobile App - Expo / React Native] --> B{Action}
-    B -->|Scan| C[Camera & Barcode API]
-    B -->|Schedule| D[Local Notification Engine]
+    A[Mobile App - React Native / Expo] --> B{Action}
+    B -->|Record Audio| C[Groq API - Whisper]
+    B -->|Generate Report| D[Groq API - Llama 3]
     
     A <--> E[Firebase Suite]
     subgraph Cloud Backend
@@ -87,10 +83,10 @@ graph TD
         E --- G[Anonymous Auth]
     end
 
-    subgraph Logic Layers
-        C --> H[OCR / Data Parsing]
-        H --> F
-        F --> D
+    subgraph AI Processing
+        C -->|Raw Transcript| H[Data Extraction Layer]
+        H -->|JSON Payload| D
+        D -->|Markdown Report| I[Translation & Email Engine]
     end
 ```
 
@@ -98,157 +94,36 @@ graph TD
 
 ## 🛠️ Tech Stack
 
-- **📱 Frontend:** React Native, Expo, Expo Go (Live Demo), TypeScript / JavaScript
-- **📷 Scanning & AI:** `expo-camera`, `expo-barcode-scanner`, ML Kit OCR / Text Parsing
-- **☁️ Backend:** Firebase Firestore, Firebase Authentication (Anonymous Login)
-- **🔔 Notifications:** `expo-notifications` (Offline-first local notifications)
-- **🗃️ State Management:** React Context API (or Zustand)
-
----
-
-## 🗂️ Database Structure (Firestore NoSQL)
-
-<details open>
-<summary><b>View Schema Definitions</b></summary>
-
-### `users`
-| Field | Type | Description |
-|---|---|---|
-| `userId` | `string` | Unique identifier generated by Firebase Auth |
-| `createdAt` | `timestamp` | Account creation date |
-
-### `medications`
-| Field | Type | Description |
-|---|---|---|
-| `id` | `string` | Unique document ID |
-| `name` | `string` | Name of the medicine |
-| `dosage` | `string` | Prescribed dosage (e.g., 500mg) |
-| `expiryDate` | `timestamp` | Expiration date |
-| `totalQuantity` | `number` | Total pills initially added |
-| `remainingQuantity` | `number` | Current stock |
-| `barcodeId` | `string` | Captured barcode |
-| `imageUrl` | `string` | Reference image URL |
-
-### `schedules`
-| Field | Type | Description |
-|---|---|---|
-| `medicationId` | `string` | Reference to the medication |
-| `doseTimes` | `array` | List of scheduled intake times (e.g., ['08:00', '20:00']) |
-| `startDate` | `timestamp` | Schedule start |
-| `endDate` | `timestamp` | Schedule end |
-
-### `dose_logs`
-| Field | Type | Description |
-|---|---|---|
-| `medicationId` | `string` | Reference to the medication |
-| `scheduledTime` | `timestamp` | When it was supposed to be taken |
-| `status` | `string` | Enum: `taken` or `missed` |
-| `timestamp` | `timestamp` | Exact time the action was logged |
-
-</details>
-
----
-
-## 🔄 App Workflow
-
-1. **Scan:** User scans their medicine bottle or box.
-2. **Extract:** App parses formulation and extracts medication details.
-3. **Verify:** User confirms the auto-filled information.
-4. **Schedule:** User sets the intake schedule and current inventory constraints.
-5. **Remind:** App schedules offline local reminders.
-6. **Log:** User logs medication intake via push notifications.
-7. **Update:** System updates stock in Firestore and triggers alerts if necessary.
-
----
-
-## 👥 Team Structure (4 Members)
-
-| Role | Primary Responsibility |
-|------|------------------------|
-| **Dev 1** | Scanner + Camera Integration & ML processing |
-| **Dev 2** | Local Scheduling & Push Notification Engine |
-| **Dev 3** | Inventory State Management & Alert Logic |
-| **Dev 4** | UI/UX, Dashboard Creation, & Firebase Integration |
-
----
-
-## ⏱️ Development Timeline (24 Hours)
-
-- **Phase 1 — Setup (2 hrs):** Expo project setup, Firebase integration, Base navigation structure.
-- **Phase 2 — Core Features (10 hrs):** Scanner implementation, Adding medication flow, Scheduling robust system.
-- **Phase 3 — Logic Layer (6 hrs):** Reminder listeners, Inventory counting, Alert rules formulation.
-- **Phase 4 — Polish & Presentation (6 hrs):** Dashboard UI overhaul, Demo optimization, QA & Bug fixes.
-
----
-
-## 🧠 Core Alert Logic Code Snippets
-
-```javascript
-// Dose Reminder
-if (currentTime === scheduledDose) {
-  sendNotification();
-}
-
-// Missed Medication Escalation
-if (timeSinceScheduled > 30 * MINUTES && !log.taken) {
-  markAsMissed();
-  notifyUser();
-  notifyNurse(); // Escalated alert
-}
-
-// Low Stock Alert
-if (remainingQuantity <= threshold) {
-  notifyUserLowStock();
-}
-
-// Expiry Alert
-if (daysToExpiry <= 30) {
-  sendExpiryWarning();
-}
-```
-
----
-
-## 🔒 Privacy & Security Considerations
-
-- **Minimal Data:** Only strictly necessary, non-identifiable data is stored in the Firebase cloud.
-- **Anonymous Auth:** Users can start tracking immediately without providing email or passwords.
-- **Offline First:** Local notifications function entirely offline.
-- **No PHI Storage:** No sensitive medical records are required or stored externally, complying with generic usage policies.
-
----
-
-## 🎥 Demo Flow (For Judges)
-
-1. **Capture:** Scan a medicine barcode live.
-2. **Process:** Show auto-filled details extracting accurate data.
-3. **Set:** Set a reminder for +1 minute into the future.
-4. **Alert:** Receive the scheduled push notification.
-5. **Action:** Mark the medicine as "taken" straight from the UI.
-6. **Analytics:** Show the real-time inventory decrease on the dashboard.
-7. **Edge Cases:** Manually trigger a low-stock or expiry alert to demonstrate proactive safety features.
+- **📱 Frontend:** React Native, Expo, TypeScript
+- **🧠 AI & Inference:** Groq API (`whisper-large-v3`, `llama-3.3-70b-versatile`)
+- **☁️ Backend & DB:** Firebase Authentication, Firestore NoSQL
+- **🔔 Utilities:** Expo Audio Recording, Mail/Sharing intents
 
 ---
 
 ## 🧑‍💻 Quickstart & Installation
 
-Ensure you have **Node.js** and the **Expo CLI** installed. Download the [Expo Go](https://expo.dev/client) app on your Android or iOS device.
+Ensure you have **Node.js** and the **Expo CLI** installed.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-team/medtrack-ai
-cd medtrack-ai
+git clone https://github.com/riyan42069/hackathon
+cd hackathon/something
 
 # Install dependencies
 npm install
+
+# Set up your Environment Variables in a .env file:
+# EXPO_PUBLIC_GROQ_API_KEY="your-groq-api-key"
+# (Also include Firebase config keys if needed)
 
 # Start the Expo development server
 npx expo start
 ```
 
-*Open the Expo Go app and scan the generated QR code to live preview the application!*
+*Open the Expo Go app and scan the generated QR code to live preview the application on your physical device to test the microphone/recording features!*
 
 <div align="center">
   <br/>
-  <sub>Built with ❤️ during a 24-hour hackathon.</sub>
+  <sub>Built with ❤️ during the Hackathon.</sub>
 </div>
