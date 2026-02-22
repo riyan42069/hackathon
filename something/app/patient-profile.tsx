@@ -47,6 +47,7 @@ interface Medicine {
   daysPerWeekToTakeThePrescription: string;
   pillSchedule: string;
   refillOrNot: boolean;
+  status?: 'upcoming' | 'done' | 'missed';
 }
 
 interface Patient {
@@ -445,7 +446,16 @@ export default function PatientProfileScreen() {
       Alert.alert('No Pills Left', `${med.name} has no pills remaining.`);
       return;
     }
-    meds[medIdx] = { ...med, pillsLeft: currentLeft - 1 };
+    const newPillsLeft = currentLeft - 1;
+    const totalPrescribed = parseInt(med.totalPillsPrescribed, 10) || 0;
+    // Auto-enable refill when pills drop to 20% or below
+    const needsRefill = totalPrescribed > 0 && newPillsLeft <= totalPrescribed * 0.2;
+    meds[medIdx] = {
+      ...med,
+      pillsLeft: newPillsLeft,
+      status: 'done' as const,
+      refillOrNot: needsRefill || med.refillOrNot,
+    };
     try {
       await updateDoc(doc(db, 'patients', id as string), { medicines: meds });
     } catch (e) {

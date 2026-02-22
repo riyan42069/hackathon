@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { subscribeToPatients } from '../../services/patients';
 import { auth } from '../../services/firebase'; 
-import { scheduleMedicationReminder } from '../../services/notifications'; 
+import { scheduleMedicationReminder, cancelAllNotifications } from '../../services/notifications';
 
 // --- Types & Interfaces ---
 type ReminderStatus = 'upcoming' | 'done' | 'missed';
@@ -12,11 +12,12 @@ type ReminderStatus = 'upcoming' | 'done' | 'missed';
 interface Medicine {
   name: string;
   totalPillsPrescribed: string;
+  pillsLeft?: number;
   pillsPerDayToBeTaken: string;
   daysPerWeekToTakeThePrescription: string;
   pillSchedule: string;
   refillOrNot: boolean;
-  status?: ReminderStatus; 
+  status?: ReminderStatus;
 }
 
 interface Patient {
@@ -110,15 +111,19 @@ export default function RemindersScreen() {
             if (now > reminderTime) currentStatus = 'missed';
           }
 
+          const totalPills = parseInt(m.totalPillsPrescribed, 10) || 0;
+          const pillsLeft = m.pillsLeft ?? totalPills;
+          const needsRefill = m.refillOrNot === true || (totalPills > 0 && pillsLeft <= totalPills * 0.2);
+
           items.push({
             id: `${p.id}-med-${index}`,
             patient: p.name || 'Unknown Patient',
             medicine: m.name || 'Unknown Med',
-            dosage: `${m.pillsPerDayToBeTaken || 1}x daily`,
+            dosage: `${m.pillsPerDayToBeTaken || 1}x daily · ${pillsLeft}/${totalPills} left`,
             time: m.pillSchedule || '',
             status: currentStatus,
-            urgent: m.refillOrNot === true,
-            group: getGroup(m.pillSchedule || '', m.refillOrNot === true), 
+            urgent: needsRefill,
+            group: getGroup(m.pillSchedule || '', needsRefill),
           });
         });
       });
@@ -133,10 +138,19 @@ export default function RemindersScreen() {
       Alert.alert("No Reminders", "Add a patient first.");
       return;
     }
+    // Clear all existing scheduled notifications, then re-schedule
+    await cancelAllNotifications();
+    let scheduled = 0;
     for (const r of reminders) {
-      await scheduleMedicationReminder(r.patient, r.medicine, r.time);
+      if (!r.time) continue;
+      // A reminder can have multiple times: "8:00 AM, 8:00 PM"
+      const times = r.time.split(',').map(t => t.trim()).filter(Boolean);
+      for (const t of times) {
+        const id = await scheduleMedicationReminder(r.patient, r.medicine, t);
+        if (id) scheduled++;
+      }
     }
-    Alert.alert("Sync Successful", "Alarms scheduled! Check console for mock logs.");
+    Alert.alert("Sync Successful", `${scheduled} notification${scheduled !== 1 ? 's' : ''} scheduled. You'll get reminders even when the app is closed.`);
   };
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
