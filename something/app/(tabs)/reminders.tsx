@@ -2,12 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { subscribeToPatients } from '../../services/patients';
-import { auth } from '../../services/firebase'; 
 import { scheduleMedicationReminder, cancelAllNotifications } from '../../services/notifications';
 
 // --- Types & Interfaces ---
-type ReminderStatus = 'upcoming' | 'done' | 'missed';
+type ReminderStatus = 'upcoming' | 'taken' | 'missed';
 
 interface Medicine {
   name: string;
@@ -17,7 +17,7 @@ interface Medicine {
   daysPerWeekToTakeThePrescription: string;
   pillSchedule: string;
   refillOrNot: boolean;
-  status?: ReminderStatus;
+  status?: string;
 }
 
 interface Patient {
@@ -28,25 +28,25 @@ interface Patient {
 
 interface UnifiedReminder {
   id: string;
+  patientId: string;
   patient: string;
   medicine: string;
   dosage: string;
   time: string;
   status: ReminderStatus;
-  urgent: boolean;
-  group: GroupType; 
+  needsRefill: boolean;
+  group: GroupType;
 }
 
 // --- Helper Functions ---
 type GroupType = 'Action Needed' | 'Morning' | 'Afternoon' | 'Evening' | 'Other';
 
-function getGroup(schedule: string, refillNeeded: boolean): GroupType {
-  if (refillNeeded) return 'Action Needed';
+function getTimeGroup(schedule: string): GroupType {
   if (!schedule) return 'Other';
   const s = schedule.toUpperCase();
   const amMatch = s.match(/(\d+)(?::\d+)?\s*AM/);
   const pmMatch = s.match(/(\d+)(?::\d+)?\s*PM/);
-  
+
   if (amMatch) return 'Morning';
   if (pmMatch) {
     const hour = parseInt(pmMatch[1], 10);
@@ -59,16 +59,16 @@ function getGroup(schedule: string, refillNeeded: boolean): GroupType {
 }
 
 const GROUP_CONFIG: { key: GroupType; icon: any; label: string }[] = [
-  { key: 'Action Needed', icon: 'alert-circle-outline', label: 'Action Needed: Refill' },
-  { key: 'Morning',   icon: 'sunny-outline',        label: 'Morning' },
-  { key: 'Afternoon', icon: 'partly-sunny-outline', label: 'Afternoon' },
-  { key: 'Evening',   icon: 'moon-outline',         label: 'Evening' },
-  { key: 'Other',     icon: 'time-outline',         label: 'Other' },
+  { key: 'Action Needed', icon: 'alert-circle-outline', label: 'Needs Refill' },
+  { key: 'Morning',       icon: 'sunny-outline',        label: 'Morning' },
+  { key: 'Afternoon',     icon: 'partly-sunny-outline', label: 'Afternoon' },
+  { key: 'Evening',       icon: 'moon-outline',         label: 'Evening' },
+  { key: 'Other',         icon: 'time-outline',         label: 'Other' },
 ];
 
 function statusStyle(status: ReminderStatus) {
   switch (status) {
-    case 'done':     return { bg: '#E8F5E9', text: '#2E7D32', label: 'Done' };
+    case 'taken':    return { bg: '#E8F5E9', text: '#2E7D32', label: 'Taken' };
     case 'missed':   return { bg: '#FFEBEE', text: '#C62828', label: 'Missed' };
     case 'upcoming': return { bg: '#EBF4FF', text: '#007AFF', label: 'Upcoming' };
   }
@@ -83,7 +83,7 @@ function parseTimeToToday(timeStr: string): Date {
   let hrs = parseInt(match[1], 10) || 0;
   const mins = parseInt(match[2], 10) || 0;
   const modifier = match[3];
-  
+
   if (modifier === 'PM' && hrs < 12) hrs += 12;
   if (modifier === 'AM' && hrs === 12) hrs = 0;
 
@@ -96,6 +96,7 @@ function parseTimeToToday(timeStr: string): Date {
 export default function RemindersScreen() {
   const [reminders, setReminders] = useState<UnifiedReminder[]>([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     const unsubscribe = subscribeToPatients((patientsData: any[]) => {
@@ -105,25 +106,40 @@ export default function RemindersScreen() {
       patientsData.forEach((p: Patient) => {
         const meds: Medicine[] = p.medicines || [];
         meds.forEach((m, index) => {
-          let currentStatus: ReminderStatus = m.status || 'upcoming';
-          if (currentStatus !== 'done' && m.pillSchedule) {
-            const reminderTime = parseTimeToToday(m.pillSchedule);
-            if (now > reminderTime) currentStatus = 'missed';
-          }
-
           const totalPills = parseInt(m.totalPillsPrescribed, 10) || 0;
           const pillsLeft = m.pillsLeft ?? totalPills;
-          const needsRefill = m.refillOrNot === true || (totalPills > 0 && pillsLeft <= totalPills * 0.2);
+          const needsRefill = totalPills > 0 && pillsLeft <= totalPills * 0.2;
+
+          // Determine status based on medicine state
+          let currentStatus: ReminderStatus = 'upcoming';
+          if (m.status === 'done') {
+            currentStatus = 'taken';
+          } else if (pillsLeft <= 0) {
+            currentStatus = 'missed';
+          } else if (m.pillSchedule) {
+            // Check first schedule time against current time
+            const firstTime = m.pillSchedule.split(',')[0]?.trim();
+            if (firstTime) {
+              const reminderTime = parseTimeToToday(firstTime);
+              if (now > reminderTime && m.status !== 'done') {
+                currentStatus = 'missed';
+              }
+            }
+          }
+
+          // Group: low stock medicines go to "Action Needed", rest by time
+          const group: GroupType = needsRefill ? 'Action Needed' : getTimeGroup(m.pillSchedule || '');
 
           items.push({
             id: `${p.id}-med-${index}`,
+            patientId: p.id,
             patient: p.name || 'Unknown Patient',
             medicine: m.name || 'Unknown Med',
             dosage: `${m.pillsPerDayToBeTaken || 1}x daily · ${pillsLeft}/${totalPills} left`,
             time: m.pillSchedule || '',
             status: currentStatus,
-            urgent: needsRefill,
-            group: getGroup(m.pillSchedule || '', needsRefill),
+            needsRefill,
+            group,
           });
         });
       });
@@ -138,26 +154,24 @@ export default function RemindersScreen() {
       Alert.alert("No Reminders", "Add a patient first.");
       return;
     }
-    // Clear all existing scheduled notifications, then re-schedule
     await cancelAllNotifications();
     let scheduled = 0;
     for (const r of reminders) {
       if (!r.time) continue;
-      // A reminder can have multiple times: "8:00 AM, 8:00 PM"
       const times = r.time.split(',').map(t => t.trim()).filter(Boolean);
       for (const t of times) {
         const id = await scheduleMedicationReminder(r.patient, r.medicine, t);
         if (id) scheduled++;
       }
     }
-    Alert.alert("Sync Successful", `${scheduled} notification${scheduled !== 1 ? 's' : ''} scheduled. You'll get reminders even when the app is closed.`);
+    Alert.alert("Sync Successful", `${scheduled} notification${scheduled !== 1 ? 's' : ''} scheduled.`);
   };
 
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const total = reminders.length;
   const upcoming = reminders.filter(r => r.status === 'upcoming').length;
-  const missed = reminders.filter(r => r.status === 'missed').length;
-  const refill = reminders.filter(r => r.urgent).length;
+  const taken = reminders.filter(r => r.status === 'taken').length;
+  const refill = reminders.filter(r => r.needsRefill).length;
 
   if (loading) {
     return (
@@ -188,7 +202,7 @@ export default function RemindersScreen() {
         {[
           [total, '#1C1C1E', 'Total'],
           [upcoming, '#007AFF', 'Upcoming'],
-          [missed, '#FF3B30', 'Missed'],
+          [taken, '#2E7D32', 'Taken'],
           [refill, '#FF9500', 'Refill'],
         ].map(([num, color, label]) => (
           <View key={label as string} style={styles.summaryCard}>
@@ -219,11 +233,11 @@ export default function RemindersScreen() {
                   {groupReminders.map((r) => {
                     const s = statusStyle(r.status);
                     return (
-                      <TouchableOpacity 
-                        key={r.id} 
+                      <TouchableOpacity
+                        key={r.id}
                         activeOpacity={0.7}
-                        style={[styles.reminderCard, r.urgent && styles.reminderCardUrgent]}
-                        onPress={() => Alert.alert("Reminder", `${r.medicine} for ${r.patient}`)}
+                        style={[styles.reminderCard, r.needsRefill && styles.reminderCardUrgent]}
+                        onPress={() => router.push({ pathname: '/patient-profile', params: { id: r.patientId } })}
                       >
                         <View style={styles.reminderLeft}>
                           <View style={[styles.pillIcon, { backgroundColor: s.bg }]}>
@@ -232,8 +246,8 @@ export default function RemindersScreen() {
                           <View style={{ flex: 1 }}>
                             <View style={styles.reminderTopRow}>
                               <Text style={styles.medicineName}>{r.medicine}</Text>
-                              {r.urgent && (
-                                <View style={styles.lowStockBadge}><Text style={styles.lowStockText}>REFILL</Text></View>
+                              {r.needsRefill && (
+                                <View style={styles.lowStockBadge}><Text style={styles.lowStockText}>LOW</Text></View>
                               )}
                             </View>
                             <Text style={styles.dosageText}>{r.dosage} · {r.patient}</Text>
@@ -262,54 +276,53 @@ export default function RemindersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#F2F2F7' 
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F7'
   },
-  header: { 
-    backgroundColor: '#fff', 
-    paddingHorizontal: 20, 
-    paddingVertical: 16, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#F2F2F7' 
+  header: {
+    backgroundColor: '#fff',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7'
   },
-  
-  headerTopRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
+  headerTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    width: '100%' 
+    width: '100%'
   },
-  headerTitle: { 
-    fontSize: 28, 
-    fontWeight: '800', 
-    color: '#1C1C1E', 
-    letterSpacing: -0.5 
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#1C1C1E',
+    letterSpacing: -0.5
   },
-  headerDate: { 
-    fontSize: 14, 
-    color: '#8E8E93', 
-    fontWeight: '500', 
-    marginTop: 2 
+  headerDate: {
+    fontSize: 14,
+    color: '#8E8E93',
+    fontWeight: '500',
+    marginTop: 2
   },
-  syncButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#007AFF', // Solid blue so it's easier to see
-    paddingHorizontal: 15, 
-    paddingVertical: 8, 
-    borderRadius: 20, 
+  syncButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
     gap: 6,
-    elevation: 3, // Android shadow
-    shadowColor: '#000', // iOS shadow
+    elevation: 3,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
   },
-  syncText: { 
-    color: '#fff', // White text on blue button
-    fontWeight: '700', 
-    fontSize: 13 
+  syncText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13
   },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   summaryRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 16, gap: 10 },

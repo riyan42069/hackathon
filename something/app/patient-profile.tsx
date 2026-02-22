@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { doc, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { MedicineAutocomplete } from '../components/MedicineAutocomplete';
 import { generatePatientSummary, translateAndDraftEmail, processConsultationRecording } from '../services/ai';
@@ -437,6 +437,82 @@ export default function PatientProfileScreen() {
     }
   };
 
+  const handleDeletePatient = () => {
+    Alert.alert(
+      'Delete Patient',
+      `Are you sure you want to delete ${patient?.name}? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteDoc(doc(db, 'patients', id as string));
+              router.back();
+            } catch (e) {
+              Alert.alert('Error', 'Could not delete patient.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleDeleteMedicine = (medIdx: number) => {
+    if (!patient) return;
+    const med = (patient.medicines || [])[medIdx];
+    Alert.alert(
+      'Delete Medicine',
+      `Are you sure you want to remove ${med.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const meds = [...(patient.medicines || [])];
+            meds.splice(medIdx, 1);
+            try {
+              await updateDoc(doc(db, 'patients', id as string), { medicines: meds });
+            } catch (e) {
+              Alert.alert('Error', 'Could not delete medicine.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRefillMedicine = (medIdx: number) => {
+    if (!patient) return;
+    const med = (patient.medicines || [])[medIdx];
+    Alert.alert(
+      'Refill Medicine',
+      `Are you sure you want to refill ${med.name}? This will reset pills to ${med.totalPillsPrescribed}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Refill',
+          onPress: async () => {
+            const meds = [...(patient.medicines || [])];
+            meds[medIdx] = {
+              ...med,
+              pillsLeft: parseInt(med.totalPillsPrescribed, 10) || 0,
+              status: 'upcoming' as const,
+              refillOrNot: false,
+            };
+            try {
+              await updateDoc(doc(db, 'patients', id as string), { medicines: meds });
+            } catch (e) {
+              Alert.alert('Error', 'Could not refill medicine.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   const handleTakePill = async (medIdx: number) => {
     if (!patient) return;
     const meds = [...(patient.medicines || [])];
@@ -454,7 +530,7 @@ export default function PatientProfileScreen() {
       ...med,
       pillsLeft: newPillsLeft,
       status: 'done' as const,
-      refillOrNot: needsRefill || med.refillOrNot,
+      refillOrNot: needsRefill,
     };
     try {
       await updateDoc(doc(db, 'patients', id as string), { medicines: meds });
@@ -496,7 +572,11 @@ export default function PatientProfileScreen() {
   }
 
   const medicines: Medicine[] = patient.medicines || [];
-  const refillCount = medicines.filter(m => m.refillOrNot).length;
+  const refillCount = medicines.filter(m => {
+    const total = parseInt(m.totalPillsPrescribed, 10) || 0;
+    const left = m.pillsLeft ?? total;
+    return total > 0 && left <= total * 0.2;
+  }).length;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -505,11 +585,18 @@ export default function PatientProfileScreen() {
           <Ionicons name="chevron-back" size={20} color="#007AFF" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        {activeTab === 'profile' && (
-          <TouchableOpacity onPress={openEditModal} style={styles.editHeaderBtn}>
-            <Ionicons name="pencil-outline" size={20} color="#007AFF" />
-          </TouchableOpacity>
-        )}
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          {activeTab === 'profile' && (
+            <>
+              <TouchableOpacity onPress={openEditModal} style={styles.editHeaderBtn}>
+                <Ionicons name="pencil-outline" size={20} color="#007AFF" />
+              </TouchableOpacity>
+              <TouchableOpacity onPress={handleDeletePatient} style={styles.editHeaderBtn}>
+                <Ionicons name="trash-outline" size={20} color="#FF3B30" />
+              </TouchableOpacity>
+            </>
+          )}
+        </View>
       </View>
 
       <View style={styles.patientBanner}>
@@ -640,9 +727,10 @@ export default function PatientProfileScreen() {
                 const totalPills = parseInt(med.totalPillsPrescribed, 10) || 0;
                 const pct = totalPills > 0 ? (pillsLeft / totalPills) * 100 : 0;
                 const barColor = pct > 30 ? '#34C759' : pct > 10 ? '#FF9500' : '#FF3B30';
+                const needsRefill = totalPills > 0 && pillsLeft <= totalPills * 0.2;
 
                 return (
-                  <View key={idx} style={[styles.medCard, med.refillOrNot && styles.medCardRefill]}>
+                  <View key={idx} style={[styles.medCard, needsRefill && styles.medCardRefill]}>
                     <View style={styles.medHeader}>
                       <View style={styles.medIconBox}>
                         <Ionicons name="medical-outline" size={22} color="#007AFF" />
@@ -651,11 +739,14 @@ export default function PatientProfileScreen() {
                         <Text style={styles.medName}>{med.name}</Text>
                         <Text style={styles.medDosage}>{med.pillsPerDayToBeTaken} pill(s)/day</Text>
                       </View>
-                      {med.refillOrNot && (
+                      {needsRefill && (
                         <View style={styles.refillBadge}>
                           <Text style={styles.refillBadgeText}>REFILL</Text>
                         </View>
                       )}
+                      <TouchableOpacity onPress={() => handleDeleteMedicine(idx)} style={{ padding: 4 }}>
+                        <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                      </TouchableOpacity>
                     </View>
 
                     {/* Pills left progress */}
@@ -669,18 +760,28 @@ export default function PatientProfileScreen() {
                       </View>
                     </View>
 
-                    {/* Take pill button */}
-                    <TouchableOpacity
-                      style={[styles.takePillButton, pillsLeft <= 0 && styles.takePillButtonDisabled]}
-                      activeOpacity={0.7}
-                      onPress={() => handleTakePill(idx)}
-                      disabled={pillsLeft <= 0}
-                    >
-                      <Ionicons name="remove-circle-outline" size={18} color={pillsLeft > 0 ? '#fff' : '#C7C7CC'} />
-                      <Text style={[styles.takePillText, pillsLeft <= 0 && styles.takePillTextDisabled]}>
-                        {pillsLeft > 0 ? 'Take Pill' : 'No Pills Left'}
-                      </Text>
-                    </TouchableOpacity>
+                    {/* Take pill & Refill buttons */}
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <TouchableOpacity
+                        style={[styles.takePillButton, { flex: 1 }, pillsLeft <= 0 && styles.takePillButtonDisabled]}
+                        activeOpacity={0.7}
+                        onPress={() => handleTakePill(idx)}
+                        disabled={pillsLeft <= 0}
+                      >
+                        <Ionicons name="remove-circle-outline" size={18} color={pillsLeft > 0 ? '#fff' : '#C7C7CC'} />
+                        <Text style={[styles.takePillText, pillsLeft <= 0 && styles.takePillTextDisabled]}>
+                          {pillsLeft > 0 ? 'Take Pill' : 'No Pills Left'}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.refillButton, { flex: 1 }]}
+                        activeOpacity={0.7}
+                        onPress={() => handleRefillMedicine(idx)}
+                      >
+                        <Ionicons name="refresh-outline" size={18} color="#fff" />
+                        <Text style={styles.takePillText}>Refill</Text>
+                      </TouchableOpacity>
+                    </View>
 
                     <View style={styles.medDetails}>
                       {med.pillSchedule ? (
@@ -1024,6 +1125,7 @@ const styles = StyleSheet.create({
   progressBar: { height: 6, borderRadius: 3, backgroundColor: '#F2F2F7', overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 3 },
   takePillButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#007AFF', borderRadius: 10, paddingVertical: 10 },
+  refillButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#FF9500', borderRadius: 10, paddingVertical: 10 },
   takePillButtonDisabled: { backgroundColor: '#F2F2F7' },
   takePillText: { fontSize: 14, fontWeight: '700', color: '#fff' },
   takePillTextDisabled: { color: '#C7C7CC' },
