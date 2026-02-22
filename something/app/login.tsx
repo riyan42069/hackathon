@@ -1,14 +1,41 @@
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import { GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
+import { auth } from '../services/firebase';
+
+WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const router = useRouter();
+
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
+  });
+
+  useEffect(() => {
+    if (response?.type === 'success') {
+      const { id_token } = response.params;
+      const credential = GoogleAuthProvider.credential(id_token);
+      setGoogleLoading(true);
+      signInWithCredential(auth, credential)
+        .then(() => router.replace('/(tabs)'))
+        .catch((err) => {
+          console.error('Google sign-in error:', err);
+          setGoogleLoading(false);
+        });
+    }
+  }, [response]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -50,6 +77,28 @@ export default function LoginScreen() {
             <TouchableOpacity style={styles.signInButton} activeOpacity={0.85} onPress={() => router.replace('/(tabs)')}>
               <Text style={styles.signInText}>Sign In</Text>
             </TouchableOpacity>
+
+            <View style={styles.dividerRow}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <TouchableOpacity
+              style={styles.googleButton}
+              activeOpacity={0.85}
+              disabled={!request || googleLoading}
+              onPress={() => promptAsync()}
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#1C1C1E" />
+              ) : (
+                <>
+                  <Ionicons name="logo-google" size={20} color="#EA4335" style={{ marginRight: 10 }} />
+                  <Text style={styles.googleText}>Continue with Google</Text>
+                </>
+              )}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.hipaaRow}>
@@ -80,6 +129,11 @@ const styles = StyleSheet.create({
   forgotText: { fontSize: 14, fontWeight: '600', color: '#007AFF' },
   signInButton: { backgroundColor: '#007AFF', borderRadius: 14, height: 54, alignItems: 'center', justifyContent: 'center', marginTop: 4, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 4 },
   signInText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E5EA' },
+  dividerText: { fontSize: 13, color: '#8E8E93', fontWeight: '500' },
+  googleButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#F2F2F7', borderRadius: 14, height: 54, borderWidth: 1, borderColor: '#E5E5EA' },
+  googleText: { fontSize: 16, fontWeight: '600', color: '#1C1C1E' },
   hipaaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   hipaaText: { fontSize: 13, color: '#8E8E93', fontWeight: '500' },
 });
