@@ -1,11 +1,11 @@
 import { collection, addDoc, onSnapshot, query, orderBy } from "firebase/firestore";
 import { db, auth } from "./firebase";
+import { scheduleMedicationReminder } from './notifications';
 
-//Get the current logged in user's patients collection reference
 function getPatientsCollection() {
-  const user = auth.currentUser;
-  if (!user) throw new Error("Not authenticated");
-  return collection(db, "users", user.uid, "patients");
+  // Instead of: collection(db, "users", user.uid, "patients")
+  // We just look at the global root collection:
+  return collection(db, "patients");
 }
 //subscribe to patients collection changes and call the callback with the updated list of patients
 export function subscribeToPatients(callback: (patients: any[]) => void) {
@@ -17,7 +17,19 @@ export function subscribeToPatients(callback: (patients: any[]) => void) {
   });
 }
 //add a new patient to the current logged in user's patients collection
-export async function addPatient(data: object) {
+export async function addPatient(data: any) {
+  // Save to Firebase 
   const ref = getPatientsCollection();
-  return addDoc(ref, { ...data, createdAt: new Date().toISOString() });
+  const docRef = await addDoc(ref, { ...data, createdAt: new Date().toISOString() });
+
+  // Loop through medicines and schedule alarms!
+  if (data.medicines && Array.isArray(data.medicines)) {
+    for (const med of data.medicines) {
+      if (med.pillSchedule) {
+        await scheduleMedicationReminder(data.name, med.name, med.pillSchedule);
+      }
+    }
+  }
+
+  return docRef;
 }

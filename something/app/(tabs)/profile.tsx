@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { signOut, onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '../../services/firebase';
+import { auth, db } from '../../services/firebase';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 function SettingRow({ icon, label, value, danger = false, onPress }: { icon: any; label: string; value?: string; danger?: boolean; onPress?: () => void }) {
   return (
@@ -24,11 +25,38 @@ function SettingRow({ icon, label, value, danger = false, onPress }: { icon: any
 export default function ProfileScreen() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [loadingPref, setLoadingPref] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUser(u));
+    const unsub = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', u.uid));
+          if (userDoc.exists()) {
+            setNotificationsEnabled(userDoc.data().notificationsEnabled);
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+      setLoadingPref(false);
+    });
     return () => unsub();
   }, []);
+  //update the database when the toggle is switched, and also update local state to reflect the change immediately in the UI
+  const toggleNotifications = async (value: boolean) => {
+    setNotificationsEnabled(value);
+    if (user) {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        await setDoc(userRef, { notificationsEnabled: value }, { merge: true });
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  };
 
   function handleSignOut() {
     Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
@@ -71,7 +99,21 @@ export default function ProfileScreen() {
 
         <Text style={styles.sectionLabel}>SETTINGS</Text>
         <View style={styles.card}>
-          <SettingRow icon="notifications-outline" label="Notifications" />
+          <View style={styles.settingRow}>
+            <View style={styles.settingIconBox}>
+              <Ionicons name="notifications-outline" size={18} color="#007AFF" />
+            </View>
+            <View style={styles.settingTextGroup}>
+              <Text style={styles.settingLabel}>Notifications</Text>
+            </View>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={toggleNotifications}
+              trackColor={{ false: "#D1D1D6", true: "#34C759" }}
+              thumbColor="#fff"
+              disabled={loadingPref}
+            />
+          </View>
           <View style={styles.divider} />
           <SettingRow icon="lock-closed-outline" label="Change Password" />
         </View>
