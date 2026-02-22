@@ -1,4 +1,4 @@
-# 🩺 MediTrack - Our very own AI Powered Application with Speech to Text and MultiLingual-Summarization assistance for Patient ERM's
+# 🩺 MediTrack - Our very own AI Powered Application with Speech to Text and MultiLingual-Summarization assistance for Patient EMR's
 
 <div align="center">
   <img src="https://img.shields.io/badge/Status-Hackathon_Build-blue.svg?style=for-the-badge" alt="Hackathon Build">
