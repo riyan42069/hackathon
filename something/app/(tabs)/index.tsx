@@ -515,13 +515,19 @@ export default function HomeScreen() {
         {/* Reminders preview (derived from real patient medicines) */}
         {(() => {
           const reminders = patients.flatMap(p =>
-            (p.medicines || []).map(m => ({
-              id: `${p.id}-${m.name}`,
-              patient: p.name,
-              medicine: m.name,
-              time: m.pillSchedule || 'N/A',
-              urgent: m.refillOrNot,
-            }))
+            (p.medicines || []).map(m => {
+              const totalPills = parseInt(m.totalPillsPrescribed, 10) || 0;
+              const pillsLeft = (m as any).pillsLeft ?? totalPills;
+              const needsRefill = totalPills > 0 && pillsLeft <= totalPills * 0.2;
+              return {
+                id: `${p.id}-${m.name}`,
+                patientId: p.id,
+                patient: p.name,
+                medicine: m.name,
+                time: m.pillSchedule || 'N/A',
+                urgent: needsRefill,
+              };
+            })
           ).slice(0, 5);
           if (reminders.length === 0) return null;
           return (
@@ -531,7 +537,12 @@ export default function HomeScreen() {
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.remindersRow}>
                 {reminders.map((r) => (
-                  <View key={r.id} style={[styles.reminderCard, r.urgent && styles.reminderCardUrgent]}>
+                  <TouchableOpacity
+                    key={r.id}
+                    style={[styles.reminderCard, r.urgent && styles.reminderCardUrgent]}
+                    activeOpacity={0.7}
+                    onPress={() => router.push({ pathname: '/patient-profile', params: { id: r.patientId } } as any)}
+                  >
                     <View style={[styles.reminderIcon, r.urgent && styles.reminderIconUrgent]}>
                       <Ionicons name="alarm-outline" size={18} color={r.urgent ? '#FF9500' : '#007AFF'} />
                     </View>
@@ -543,7 +554,7 @@ export default function HomeScreen() {
                         <Text style={styles.urgentBadgeText}>REFILL</Text>
                       </View>
                     )}
-                  </View>
+                  </TouchableOpacity>
                 ))}
               </ScrollView>
             </>
