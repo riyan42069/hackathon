@@ -162,6 +162,61 @@ Be highly analytical, thoroughly explain the patient's status, and make it look 
     return result.choices[0].message.content.trim();
 }
 
+export async function processConsultationRecording(
+  uri: string,
+  patientName: string
+): Promise<{ transcription: string; report: string }> {
+  if (!GROQ_API_KEY) {
+    throw new Error('Missing EXPO_PUBLIC_GROQ_API_KEY in .env');
+  }
+
+  // 1. Transcribe audio
+  const transcription = await transcribeAudio(uri);
+  if (!transcription || transcription.trim() === '') {
+    throw new Error('Could not transcribe audio — recording was empty.');
+  }
+
+  // 2. Generate a structured consultation report from the conversation
+  const systemPrompt = `
+You are an expert Medical Scribe listening to a doctor-patient consultation recording.
+The patient's name is ${patientName}.
+Based solely on the transcription provided, write a concise but thorough clinical consultation note in Markdown.
+
+Structure the note with these sections:
+### 🗒️ Consultation Summary
+### 🩺 Chief Complaint / Reason for Visit
+### 📋 Key Clinical Findings & Discussion
+### 💊 Treatment Plan & Decisions
+### 🔔 Follow-Up & Action Items
+
+Only include sections that are mentioned in the recording and other sections that have no input should be excluded. Be professional and clinically precise.
+`;
+
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `Consultation Transcription:\n\n"${transcription}"` },
+      ],
+      temperature: 0.2,
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error?.message || 'Failed to generate consultation report.');
+  }
+
+  const report = result.choices[0].message.content.trim();
+  return { transcription, report };
+}
+
 export async function translateAndDraftEmail(report: string, targetLanguage: string): Promise<string> {
     if (!GROQ_API_KEY) {
         throw new Error("Missing EXPO_PUBLIC_GROQ_API_KEY in .env");

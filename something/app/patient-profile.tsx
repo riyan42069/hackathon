@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  ActivityIndicator, Modal, TextInput, Switch, Alert,
+  ActivityIndicator, Modal, TextInput, Switch, Alert, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,11 +9,21 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { doc, onSnapshot, updateDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { MedicineAutocomplete } from '../components/MedicineAutocomplete';
-import { generatePatientSummary, translateAndDraftEmail } from '../services/ai';
+import { generatePatientSummary, translateAndDraftEmail, processConsultationRecording } from '../services/ai';
+import { Audio } from 'expo-av';
 import Markdown from 'react-native-markdown-display';
-import * as MailComposer from 'expo-mail-composer';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
+const MONTH_ITEMS = MONTHS;
+const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+const YEAR_ITEMS = Array.from({ length: 105 }, (_, i) => String(1920 + i));
+const FT_ITEMS = ['3 ft', '4 ft', '5 ft', '6 ft', '7 ft'];
+const IN_ITEMS = Array.from({ length: 12 }, (_, i) => `${i} in`);
+const LBS_ITEMS = Array.from({ length: 451 }, (_, i) => `${50 + i} lbs`);
+const WHEEL_H = 44;
+
 const PILLS_PER_DAY_OPTIONS = [1, 2, 3, 4, 5, 6];
 const DAYS_PER_WEEK_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 const TIME_OPTIONS = [
@@ -54,7 +64,63 @@ interface Patient {
   notes?: string;
   status?: string;
   medicines?: Medicine[];
+  consultationLogs?: ConsultationLog[];
 }
+
+interface ConsultationLog {
+  id: string;
+  timestamp: string;
+  transcription: string;
+  report: string;
+}
+
+// ─── Wheel Picker ─────────────────────────────────────────────────────────────
+function WheelPicker({ items, initialIndex, onChange }: {
+  items: string[]; initialIndex: number; onChange: (index: number) => void;
+}) {
+  const ref = useRef<ScrollView>(null);
+  const [selIdx, setSelIdx] = useState(initialIndex);
+  useEffect(() => {
+    const t = setTimeout(() => {
+      ref.current?.scrollTo({ y: initialIndex * WHEEL_H, animated: false });
+    }, 80);
+    return () => clearTimeout(t);
+  }, []);
+  const onEnd = (e: any) => {
+    const idx = Math.max(0, Math.min(items.length - 1,
+      Math.round(e.nativeEvent.contentOffset.y / WHEEL_H)));
+    setSelIdx(idx);
+    onChange(idx);
+  };
+  return (
+    <View style={wStyles.wrap}>
+      <View style={wStyles.highlight} pointerEvents="none" />
+      <ScrollView
+        ref={ref}
+        showsVerticalScrollIndicator={false}
+        snapToInterval={WHEEL_H}
+        decelerationRate="fast"
+        onMomentumScrollEnd={onEnd}
+        onScrollEndDrag={onEnd}
+        contentContainerStyle={{ paddingVertical: WHEEL_H }}
+      >
+        {items.map((item, i) => (
+          <View key={i} style={wStyles.item}>
+            <Text style={[wStyles.text, i === selIdx && wStyles.textSel]}>{item}</Text>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+const wStyles = StyleSheet.create({
+  wrap: { height: WHEEL_H * 3, overflow: 'hidden', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA' },
+  highlight: { position: 'absolute', top: WHEEL_H, height: WHEEL_H, left: 0, right: 0, backgroundColor: '#EBF4FF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#C5DCFF' },
+  item: { height: WHEEL_H, justifyContent: 'center', alignItems: 'center' },
+  text: { fontSize: 15, color: '#C7C7CC', fontWeight: '500' },
+  textSel: { fontSize: 17, color: '#1C1C1E', fontWeight: '700' },
+});
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 function InfoRow({ icon, label, value }: { icon: any; label: string; value: string }) {
@@ -117,6 +183,31 @@ export default function PatientProfileScreen() {
   const [pillSchedules, setPillSchedules] = useState<string[]>(['']);
   const [refillOrNot, setRefillOrNot] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Edit Profile modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPatientId, setEditPatientId] = useState('');
+  const [editGender, setEditGender] = useState('');
+  const [editDobMonth, setEditDobMonth] = useState(1);
+  const [editDobDay, setEditDobDay] = useState(1);
+  const [editDobYear, setEditDobYear] = useState(1990);
+  const [editHeightFt, setEditHeightFt] = useState(5);
+  const [editHeightIn, setEditHeightIn] = useState(10);
+  const [editWeightLbs, setEditWeightLbs] = useState(160);
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editEmergencyContact, setEditEmergencyContact] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editResetCount, setEditResetCount] = useState(0);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Consultation Recording State
+  const [recording, setRecording] = useState<Audio.Recording | undefined>();
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingConsultation, setIsProcessingConsultation] = useState(false);
+  const [consultLogModalVisible, setConsultLogModalVisible] = useState(false);
+  const [selectedLog, setSelectedLog] = useState<ConsultationLog | null>(null);
 
   // AI Report State
   const [reportModalVisible, setReportModalVisible] = useState(false);
@@ -186,6 +277,113 @@ export default function PatientProfileScreen() {
     }
   };
 
+  const openEditModal = () => {
+    if (!patient) return;
+    setEditName(patient.name || '');
+    setEditPatientId(patient.patientId || '');
+    setEditGender(patient.gender || '');
+
+    // Parse dob: "Jan 1, 1990"
+    const dobParts = (patient.dob || '').split(' ');
+    const mIdx = MONTHS.indexOf(dobParts[0]);
+    setEditDobMonth(mIdx >= 0 ? mIdx + 1 : 1);
+    setEditDobDay(parseInt(dobParts[1]) || 1);
+    setEditDobYear(parseInt(dobParts[2]) || 1990);
+
+    // Parse height: "5 ft 10 in"
+    const htMatch = (patient.height || '').match(/(\d+)\s*ft\s*(\d+)\s*in/);
+    setEditHeightFt(htMatch ? parseInt(htMatch[1]) : 5);
+    setEditHeightIn(htMatch ? parseInt(htMatch[2]) : 10);
+
+    // Parse weight: "160 lbs"
+    const wtMatch = (patient.weight || '').match(/(\d+)/);
+    setEditWeightLbs(wtMatch ? parseInt(wtMatch[1]) : 160);
+
+    setEditPhone(patient.phone || '');
+    setEditEmail(patient.email || '');
+    setEditEmergencyContact(patient.emergencyContact || '');
+    setEditNotes(patient.notes || '');
+    setEditResetCount(c => c + 1);
+    setEditModalVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim()) {
+      Alert.alert('Missing Info', 'Patient name is required.');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateDoc(doc(db, 'patients', id as string), {
+        name: editName.trim(),
+        patientId: editPatientId.trim(),
+        dob: `${MONTHS[editDobMonth - 1]} ${editDobDay}, ${editDobYear}`,
+        gender: editGender,
+        height: `${editHeightFt} ft ${editHeightIn} in`,
+        weight: `${editWeightLbs} lbs`,
+        phone: editPhone.trim(),
+        email: editEmail.trim(),
+        emergencyContact: editEmergencyContact.trim(),
+        notes: editNotes.trim(),
+      });
+      setEditModalVisible(false);
+    } catch (e) {
+      Alert.alert('Error', 'Could not save patient info.');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const perms = await Audio.requestPermissionsAsync();
+      if (perms.status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant microphone permissions.');
+        return;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      setRecording(rec);
+      setIsRecording(true);
+    } catch (err) {
+      Alert.alert('Error', 'Failed to start recording.');
+    }
+  };
+
+  const stopAndProcessConsultation = async () => {
+    if (!recording || !patient) return;
+    setIsRecording(false);
+    setIsProcessingConsultation(true);
+    try {
+      try { await recording.stopAndUnloadAsync(); } catch (_) {}
+      const uri = recording.getURI();
+      if (!uri) throw new Error('No recording URI found');
+      setRecording(undefined);
+
+      const { transcription, report } = await processConsultationRecording(uri, patient.name);
+
+      const newLog: ConsultationLog = {
+        id: Date.now().toString(),
+        timestamp: new Date().toISOString(),
+        transcription,
+        report,
+      };
+
+      await updateDoc(doc(db, 'patients', id as string), {
+        consultationLogs: arrayUnion(newLog),
+      });
+
+      setSelectedLog(newLog);
+      setConsultLogModalVisible(true);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Could not process recording.');
+    } finally {
+      setIsProcessingConsultation(false);
+    }
+  };
+
   const handleGenerateReport = async () => {
     if (!patient) return;
     setReportModalVisible(true);
@@ -228,33 +426,14 @@ export default function PatientProfileScreen() {
   };
 
   const handleEmailReport = async () => {
-    const isAvailable = await MailComposer.isAvailableAsync();
-    if (!isAvailable) {
-      Alert.alert("Mail Unavailable", "We cannot open the Mail app on this device.");
-      return;
+    try {
+      await Share.share({
+        title: `Clinical Summary Report - ${patient?.name || 'Patient'}`,
+        message: reportText,
+      });
+    } catch (e) {
+      Alert.alert('Error', 'Could not open share sheet.');
     }
-
-    const recipients = [];
-    if (patient?.email) recipients.push(patient.email);
-
-    if (patient?.emergencyContact) {
-      const emails = patient.emergencyContact.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)/gi);
-      if (emails) {
-        recipients.push(...emails);
-      } else if (patient.emergencyContact.includes('@')) {
-        recipients.push(patient.emergencyContact.trim());
-      }
-    }
-
-    if (recipients.length === 0) {
-      Alert.alert("Notice", "No emails found for this patient, but opening draft anyway.");
-    }
-
-    await MailComposer.composeAsync({
-      recipients,
-      subject: `Clinical Summary Report - ${patient?.name || 'Patient'}`,
-      body: reportText, // Includes markdown which may not be perfect in plain-text email, but good enough for demo!
-    });
   };
 
   const handleTakePill = async (medIdx: number) => {
@@ -316,6 +495,11 @@ export default function PatientProfileScreen() {
           <Ionicons name="chevron-back" size={20} color="#007AFF" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
+        {activeTab === 'profile' && (
+          <TouchableOpacity onPress={openEditModal} style={styles.editHeaderBtn}>
+            <Ionicons name="pencil-outline" size={20} color="#007AFF" />
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.patientBanner}>
@@ -356,6 +540,25 @@ export default function PatientProfileScreen() {
             <Text style={styles.generateReportText}>Generate AI Summary Report</Text>
           </TouchableOpacity>
 
+          {/* Record Consultation Button */}
+          {isProcessingConsultation ? (
+            <View style={styles.recordingBtn}>
+              <ActivityIndicator color="#fff" size="small" />
+              <Text style={styles.generateReportText}>Analyzing consultation...</Text>
+            </View>
+          ) : isRecording ? (
+            <TouchableOpacity style={styles.recordingActiveBtn} activeOpacity={0.8} onPress={stopAndProcessConsultation}>
+              <Ionicons name="stop-circle-outline" size={20} color="#fff" />
+              <Text style={styles.generateReportText}>Stop Recording</Text>
+              <View style={styles.recordingDot} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.recordBtn} activeOpacity={0.8} onPress={startRecording}>
+              <Ionicons name="mic-outline" size={20} color="#fff" />
+              <Text style={styles.generateReportText}>Record Consultation</Text>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.infoCard}>
             <InfoRow icon="calendar-outline" label="Date of Birth" value={patient.dob || ''} />
             <View style={styles.divider} />
@@ -377,6 +580,29 @@ export default function PatientProfileScreen() {
               <Text style={styles.notesText}>{patient.notes}</Text>
             </View>
           ) : null}
+
+          {/* Consultation Logs */}
+          {(patient.consultationLogs?.length ?? 0) > 0 && (
+            <View style={{ gap: 8 }}>
+              <Text style={styles.consultLogsHeader}>Consultation Logs</Text>
+              {[...(patient.consultationLogs ?? [])].reverse().map((log) => (
+                <TouchableOpacity
+                  key={log.id}
+                  style={styles.consultLogCard}
+                  activeOpacity={0.7}
+                  onPress={() => { setSelectedLog(log); setConsultLogModalVisible(true); }}
+                >
+                  <Text style={styles.consultLogDate}>
+                    {new Date(log.timestamp).toLocaleString()}
+                  </Text>
+                  <Text style={styles.consultLogPreview} numberOfLines={2}>
+                    {log.report.replace(/#+\s*/g, '').replace(/\*+/g, '')}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color="#C7C7CC" style={{ alignSelf: 'flex-end' }} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </ScrollView>
       ) : (
         <View style={{ flex: 1 }}>
@@ -549,6 +775,113 @@ export default function PatientProfileScreen() {
         </ScrollView>
       </Modal>
 
+      {/* Consultation Log Viewer Modal */}
+      <Modal visible={consultLogModalVisible} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setConsultLogModalVisible(false)} style={{ flex: 1 }}>
+            <Text style={styles.cancelButton}>Close</Text>
+          </TouchableOpacity>
+          <Text style={[styles.modalTitle, { flex: 2, textAlign: 'center' }]}>Consultation Note</Text>
+          <View style={{ flex: 1 }} />
+        </View>
+        {selectedLog && (
+          <>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#F2F2F7', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' }}>
+              <Text style={styles.consultLogDate}>{new Date(selectedLog.timestamp).toLocaleString()}</Text>
+              <Text style={[styles.consultLogDate, { marginTop: 4, color: '#3C3C43' }]}>
+                Transcription: "{selectedLog.transcription.slice(0, 120)}{selectedLog.transcription.length > 120 ? '…' : ''}"
+              </Text>
+            </View>
+            <ScrollView style={styles.reportContainer} contentContainerStyle={{ paddingBottom: 60, paddingTop: 10 }}>
+              <Markdown style={markdownStyles}>{selectedLog.report}</Markdown>
+            </ScrollView>
+          </>
+        )}
+      </Modal>
+
+      {/* Edit Profile Modal */}
+      <Modal visible={editModalVisible} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalHeader}>
+          <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+            <Text style={styles.cancelButton}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>Edit Profile</Text>
+          <TouchableOpacity onPress={handleSaveProfile} disabled={editSaving}>
+            {editSaving
+              ? <ActivityIndicator color="#007AFF" />
+              : <Text style={styles.saveButton}>Save</Text>}
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={mStyles.form} contentContainerStyle={{ paddingBottom: 60 }}>
+
+          <Text style={mStyles.sectionHeading}>Basic Information</Text>
+          <TextInput style={mStyles.input} value={editName} onChangeText={setEditName} placeholder="Patient Name" />
+          <TextInput style={mStyles.input} value={editPatientId} onChangeText={setEditPatientId} placeholder="ID Number" keyboardType="numeric" />
+
+          <Text style={eStyles.label}>Gender</Text>
+          <View style={eStyles.chipsRow}>
+            {GENDER_OPTIONS.map(opt => {
+              const active = editGender === opt;
+              return (
+                <TouchableOpacity key={opt} style={[eStyles.chip, active && eStyles.chipActive]} onPress={() => setEditGender(opt)} activeOpacity={0.7}>
+                  <Text style={[eStyles.chipText, active && eStyles.chipTextActive]}>{opt}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <Text style={eStyles.label}>Date of Birth</Text>
+          <View style={eStyles.wheelRow}>
+            <View style={eStyles.wheelCol}>
+              <Text style={eStyles.wheelLabel}>Month</Text>
+              <WheelPicker key={`em-${editResetCount}`} items={MONTH_ITEMS} initialIndex={editDobMonth - 1} onChange={i => setEditDobMonth(i + 1)} />
+            </View>
+            <View style={eStyles.wheelCol}>
+              <Text style={eStyles.wheelLabel}>Day</Text>
+              <WheelPicker key={`ed-${editResetCount}`} items={DAY_ITEMS} initialIndex={editDobDay - 1} onChange={i => setEditDobDay(i + 1)} />
+            </View>
+            <View style={[eStyles.wheelCol, { flex: 1.4 }]}>
+              <Text style={eStyles.wheelLabel}>Year</Text>
+              <WheelPicker key={`ey-${editResetCount}`} items={YEAR_ITEMS} initialIndex={editDobYear - 1920} onChange={i => setEditDobYear(1920 + i)} />
+            </View>
+          </View>
+
+          <Text style={eStyles.label}>Height</Text>
+          <View style={eStyles.wheelRow}>
+            <View style={eStyles.wheelCol}>
+              <Text style={eStyles.wheelLabel}>Feet</Text>
+              <WheelPicker key={`eft-${editResetCount}`} items={FT_ITEMS} initialIndex={editHeightFt - 3} onChange={i => setEditHeightFt(3 + i)} />
+            </View>
+            <View style={eStyles.wheelCol}>
+              <Text style={eStyles.wheelLabel}>Inches</Text>
+              <WheelPicker key={`ein-${editResetCount}`} items={IN_ITEMS} initialIndex={editHeightIn} onChange={i => setEditHeightIn(i)} />
+            </View>
+          </View>
+
+          <Text style={eStyles.label}>Weight</Text>
+          <View style={eStyles.wheelRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={eStyles.wheelLabel}>lbs</Text>
+              <WheelPicker key={`elbs-${editResetCount}`} items={LBS_ITEMS} initialIndex={editWeightLbs - 50} onChange={i => setEditWeightLbs(50 + i)} />
+            </View>
+          </View>
+
+          <TextInput
+            style={[mStyles.input, { height: 80, marginTop: 4 }]}
+            placeholder="Notes / History (optional)"
+            value={editNotes}
+            onChangeText={setEditNotes}
+            multiline
+          />
+
+          <Text style={mStyles.sectionHeading}>Contact Details</Text>
+          <TextInput style={mStyles.input} value={editPhone} onChangeText={setEditPhone} placeholder="Phone Number" keyboardType="phone-pad" />
+          <TextInput style={mStyles.input} value={editEmail} onChangeText={setEditEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
+          <TextInput style={mStyles.input} value={editEmergencyContact} onChangeText={setEditEmergencyContact} placeholder="Emergency Contact (Name / Phone)" />
+
+        </ScrollView>
+      </Modal>
+
       {/* AI Report Modal */}
       <Modal visible={reportModalVisible} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalHeader}>
@@ -618,10 +951,24 @@ const mStyles = StyleSheet.create({
   switchLabel: { fontSize: 15, color: '#1C1C1E', fontWeight: '500' },
 });
 
+// ─── Edit Profile form styles ─────────────────────────────────────────────────
+const eStyles = StyleSheet.create({
+  label: { fontSize: 12, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.5, marginBottom: 8, marginTop: 2, textTransform: 'uppercase' },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 14 },
+  chip: { paddingHorizontal: 16, paddingVertical: 9, borderRadius: 22, backgroundColor: '#F2F2F7', borderWidth: 1.5, borderColor: '#E5E5EA' },
+  chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  chipText: { fontSize: 14, fontWeight: '600', color: '#3C3C43' },
+  chipTextActive: { color: '#fff' },
+  wheelRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  wheelCol: { flex: 1 },
+  wheelLabel: { fontSize: 9, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.6, textTransform: 'uppercase', textAlign: 'center', marginBottom: 4 },
+});
+
 // ─── Main styles ──────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F2F2F7' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#F2F2F7' },
+  editHeaderBtn: { padding: 4 },
   backButton: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   backText: { fontSize: 16, fontWeight: '600', color: '#007AFF' },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -679,6 +1026,14 @@ const styles = StyleSheet.create({
   saveButton: { fontSize: 17, fontWeight: '600', color: '#007AFF' },
   generateReportBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#007AFF', paddingVertical: 14, borderRadius: 14, gap: 8, shadowColor: '#007AFF', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
   generateReportText: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  recordBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#34C759', paddingVertical: 14, borderRadius: 14, gap: 8, shadowColor: '#34C759', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  recordingActiveBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FF3B30', paddingVertical: 14, borderRadius: 14, gap: 8, shadowColor: '#FF3B30', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  recordingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: '#8E8E93', paddingVertical: 14, borderRadius: 14, gap: 8 },
+  recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff', opacity: 0.8 },
+  consultLogCard: { backgroundColor: '#fff', borderRadius: 14, padding: 14, gap: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.04, shadowRadius: 6, elevation: 1 },
+  consultLogDate: { fontSize: 11, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.3 },
+  consultLogPreview: { fontSize: 14, color: '#1C1C1E', fontWeight: '500', lineHeight: 20 },
+  consultLogsHeader: { fontSize: 11, fontWeight: '800', color: '#8E8E93', textTransform: 'uppercase', letterSpacing: 0.6 },
   reportContainer: { flex: 1, backgroundColor: '#FAFAFC', padding: 20 },
   langSelector: { paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#E5E5EA' },
 });

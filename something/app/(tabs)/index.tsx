@@ -464,7 +464,7 @@ export default function HomeScreen() {
 
           // Try to extract times from the schedule (e.g. "8:00 AM, 8:00 PM")
           const timeRegex = /\b(1[0-2]|[1-9]):([0-5][0-9])\s*(AM|PM)\b/gi;
-          const matchedTimes = [];
+          const matchedTimes: string[] = [];
           let match;
           while ((match = timeRegex.exec(m.pillSchedule || '')) !== null) {
             // Standardize format to uppercase AM/PM to match options e.g. "8:00 AM"
