@@ -15,29 +15,38 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db, auth } from '../../services/firebase';
+import { MedicineAutocomplete } from '../../components/MedicineAutocomplete';
+import { Audio } from 'expo-av';
+import { processAudioRecording } from '../../services/ai';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const GENDER_OPTIONS = ['Male', 'Female', 'Other'];
 const PILLS_PER_DAY_OPTIONS = [1, 2, 3, 4, 5, 6];
 const DAYS_PER_WEEK_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 const TIME_OPTIONS = [
-  '5:00 AM','6:00 AM','7:00 AM','8:00 AM','9:00 AM','10:00 AM','11:00 AM',
-  '12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM',
-  '6:00 PM','7:00 PM','8:00 PM','9:00 PM','10:00 PM',
+  '5:00 AM', '6:00 AM', '7:00 AM', '8:00 AM', '9:00 AM', '10:00 AM', '11:00 AM',
+  '12:00 PM', '1:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM',
+  '6:00 PM', '7:00 PM', '8:00 PM', '9:00 PM', '10:00 PM',
 ];
 
 // Wheel picker data
 const MONTH_ITEMS = MONTHS;
-const DAY_ITEMS   = Array.from({ length: 31  }, (_, i) => String(i + 1).padStart(2, '0'));
-const YEAR_ITEMS  = Array.from({ length: 105 }, (_, i) => String(1920 + i));
-const FT_ITEMS    = ['3 ft', '4 ft', '5 ft', '6 ft', '7 ft'];
-const IN_ITEMS    = Array.from({ length: 12  }, (_, i) => `${i} in`);
-const LBS_ITEMS   = Array.from({ length: 451 }, (_, i) => `${50 + i} lbs`);
+const DAY_ITEMS = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+const YEAR_ITEMS = Array.from({ length: 105 }, (_, i) => String(1920 + i));
+const FT_ITEMS = ['3 ft', '4 ft', '5 ft', '6 ft', '7 ft'];
+const IN_ITEMS = Array.from({ length: 12 }, (_, i) => `${i} in`);
+const LBS_ITEMS = Array.from({ length: 451 }, (_, i) => `${50 + i} lbs`);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Medicine {
   name: string;
+  category: string;
+  dosageForm: string;
+  strength: string;
+  manufacturer: string;
+  indication: string;
+  classification: string;
   totalPillsPrescribed: string;
   pillsPerDayToBeTaken: string;
   daysPerWeekToTakeThePrescription: string;
@@ -47,6 +56,12 @@ interface Medicine {
 
 interface MedicineForm {
   name: string;
+  category: string;
+  dosageForm: string;
+  strength: string;
+  manufacturer: string;
+  indication: string;
+  classification: string;
   totalPillsPrescribed: number;
   pillsPerDayToBeTaken: number;
   daysPerWeekToTakeThePrescription: number;
@@ -168,11 +183,11 @@ function WheelPicker({ items, initialIndex, onChange }: {
 }
 
 const wStyles = StyleSheet.create({
-  wrap:      { height: WHEEL_H * 3, overflow: 'hidden', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA' },
+  wrap: { height: WHEEL_H * 3, overflow: 'hidden', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA' },
   highlight: { position: 'absolute', top: WHEEL_H, height: WHEEL_H, left: 0, right: 0, backgroundColor: '#EBF4FF', borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#C5DCFF' },
-  item:      { height: WHEEL_H, justifyContent: 'center', alignItems: 'center' },
-  text:      { fontSize: 15, color: '#C7C7CC', fontWeight: '500' },
-  textSel:   { fontSize: 17, color: '#1C1C1E', fontWeight: '700' },
+  item: { height: WHEEL_H, justifyContent: 'center', alignItems: 'center' },
+  text: { fontSize: 15, color: '#C7C7CC', fontWeight: '500' },
+  textSel: { fontSize: 17, color: '#1C1C1E', fontWeight: '700' },
 });
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
@@ -186,7 +201,12 @@ export default function HomeScreen() {
   const [optionsModalVisible, setOptionsModalVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
 
-  // Basic info
+  // Audio Recording States
+  const [recording, setRecording] = useState<Audio.Recording | undefined>();
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+
+  // Form states
   const [name, setName] = useState('');
   const [idNumber, setIdNumber] = useState('');
   const [gender, setGender] = useState('');
@@ -223,13 +243,27 @@ export default function HomeScreen() {
   // ── Medicine helpers ──
   const addMedicineField = () => {
     setMedicinesForm(prev => [...prev, {
-      name: '',
+      name: '', category: '', dosageForm: '', strength: '',
+      manufacturer: '', indication: '', classification: '',
       totalPillsPrescribed: 30,
       pillsPerDayToBeTaken: 1,
       daysPerWeekToTakeThePrescription: 7,
       pillSchedules: [''],
       refillOrNot: false,
     }]);
+  };
+
+  const applyMedicineInfo = (idx: number, info: import('../../constants/medicines').MedicineInfo) => {
+    setMedicinesForm(prev => {
+      const updated = [...prev];
+      updated[idx] = {
+        ...updated[idx],
+        name: info.name, category: info.category, dosageForm: info.dosageForm,
+        strength: info.strength, manufacturer: info.manufacturer,
+        indication: info.indication, classification: info.classification,
+      };
+      return updated;
+    });
   };
 
   const updateMedicineField = (idx: number, field: keyof Omit<MedicineForm, 'pillSchedules' | 'pillsPerDayToBeTaken'>, value: any) => {
@@ -286,6 +320,12 @@ export default function HomeScreen() {
     const dob = `${MONTHS[dobMonth - 1]} ${dobDay}, ${dobYear}`;
     const medicines: Medicine[] = medicinesForm.map(m => ({
       name: m.name,
+      category: m.category,
+      dosageForm: m.dosageForm,
+      strength: m.strength,
+      manufacturer: m.manufacturer,
+      indication: m.indication,
+      classification: m.classification,
       totalPillsPrescribed: String(m.totalPillsPrescribed),
       pillsPerDayToBeTaken: String(m.pillsPerDayToBeTaken),
       daysPerWeekToTakeThePrescription: String(m.daysPerWeekToTakeThePrescription),
@@ -321,6 +361,142 @@ export default function HomeScreen() {
   const filteredPatients = patients.filter(p =>
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const startRecording = async () => {
+    try {
+      const perms = await Audio.requestPermissionsAsync();
+      if (perms.status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant audio recording permissions.');
+        return;
+      }
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      setRecording(recording);
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Failed to start recording', err);
+      Alert.alert('Error', 'Failed to start recording. ' + err);
+    }
+  };
+
+  const stopRecordingAndProcess = async () => {
+    if (!recording) return;
+    setIsRecording(false);
+    setIsProcessingAI(true);
+
+    try {
+      try {
+        await recording.stopAndUnloadAsync();
+      } catch (stopErr) {
+        // Android emulator often throws "no valid audio data received" on long recordings.
+        // The file is usually still saved to disk, so we catch this and continue!
+        console.warn("stopAndUnloadAsync warning (ignoring):", stopErr);
+      }
+
+      const uri = recording.getURI();
+      if (!uri) throw new Error("No recording URI found");
+
+      // Send to our processing function
+      const aiData = await processAudioRecording(uri);
+
+      // Stop showing options modal to transition smoothly
+      setOptionsModalVisible(false);
+
+      if (!aiData.name || aiData.name.trim() === '') {
+        Alert.alert(
+          "Microphone Check!",
+          `The AI could not find a name. Here is what your microphone ACTUALLY picked up:\n\n"${aiData.rawTranscription}"\n\nIf this says "Thank you" or is completely wrong, your Android Emulator is NOT using your real microphone. Please check the Extended Controls -> Microphone settings again!`
+        );
+      } else {
+        Alert.alert("Success!", `Transcribed:\n"${aiData.rawTranscription}"\n\nExtracting patient data now...`);
+      }
+
+      // Auto-fill form fields
+      if (aiData.name) setName(aiData.name);
+      if (aiData.idNumber) setIdNumber(aiData.idNumber);
+
+      // We are ignoring complex nested objects on our current manual form structure 
+      // but if the string fields are available, populate them.
+      if (aiData.gender) {
+        const g = aiData.gender.toLowerCase();
+        if (g.includes('female')) setGender('Female');
+        else if (g.includes('male')) setGender('Male');
+        else setGender('Other');
+      }
+      if (aiData.phone) setPhone(aiData.phone);
+      if (aiData.email) setEmail(aiData.email);
+      if (aiData.emergencyContact) setEmergencyContact(aiData.emergencyContact);
+      if (aiData.notes) setNotes(aiData.notes);
+
+      // Parse DOB
+      if (aiData.dob) {
+        const parts = aiData.dob.split(/[-/]/);
+        if (parts.length >= 3) {
+          setDobMonth(parseInt(parts[0], 10) || 1);
+          setDobDay(parseInt(parts[1], 10) || 1);
+          setDobYear(parseInt(parts[2], 10) || 1990);
+        }
+      }
+
+      // Parse Height
+      if (aiData.height) {
+        const ftMatch = aiData.height.match(/(\d+)\s*(?:foot|ft|')/i);
+        const inMatch = aiData.height.match(/(\d+)\s*(?:inches|in|")/i);
+        if (ftMatch) setHeightFt(parseInt(ftMatch[1], 10));
+        if (inMatch) setHeightIn(parseInt(inMatch[1], 10));
+      }
+
+      // Parse Weight
+      if (aiData.weight) {
+        const wtMatch = aiData.weight.match(/(\d+)/);
+        if (wtMatch) setWeightLbs(parseInt(wtMatch[1], 10));
+      }
+
+      if (aiData.medicines && Array.isArray(aiData.medicines)) {
+        setMedicinesForm(aiData.medicines.map((m: any) => {
+          const pillsPerDay = Number(m.pillsPerDayToBeTaken) || 1;
+
+          // Try to extract times from the schedule (e.g. "8:00 AM, 8:00 PM")
+          const timeRegex = /\b(1[0-2]|[1-9]):([0-5][0-9])\s*(AM|PM)\b/gi;
+          const matchedTimes = [];
+          let match;
+          while ((match = timeRegex.exec(m.pillSchedule || '')) !== null) {
+            // Standardize format to uppercase AM/PM to match options e.g. "8:00 AM"
+            matchedTimes.push(`${match[1]}:${match[2]} ${match[3].toUpperCase()}`);
+          }
+
+          const schedules = Array.from({ length: pillsPerDay }, (_, i) => matchedTimes[i] || '');
+
+          return {
+            name: m.name || '',
+            category: '', dosageForm: '', strength: '', manufacturer: '', indication: '', classification: '',
+            totalPillsPrescribed: Number(m.totalPillsPrescribed) || 30,
+            pillsPerDayToBeTaken: pillsPerDay,
+            daysPerWeekToTakeThePrescription: Number(m.daysPerWeekToTakeThePrescription) || 7,
+            pillSchedules: schedules,
+            refillOrNot: Boolean(m.refillOrNot)
+          };
+        }));
+      }
+
+      // Show the manual modal to let them verify
+      setResetCount(c => c + 1); // <--- FORCE Re-renders the interactive UI components
+      setManualModalVisible(true);
+      setRecording(undefined);
+    } catch (err: any) {
+      console.error("AI processing error", err);
+      Alert.alert('AI Processing Error', err.message || 'Failed to process speech. Check your API key.');
+      setOptionsModalVisible(false);
+    } finally {
+      setIsProcessingAI(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -446,16 +622,30 @@ export default function HomeScreen() {
               <Ionicons name="create-outline" size={24} color="#007AFF" />
               <Text style={styles.optionButtonText}>1. Manually Input Patient Data</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.optionButton}
-              onPress={() => {
-                setOptionsModalVisible(false);
-                Alert.alert('Coming Soon', 'The Record & Scrape feature is not implemented yet!');
-              }}
-            >
-              <Ionicons name="mic-outline" size={24} color="#FF3B30" />
-              <Text style={[styles.optionButtonText, { color: '#FF3B30' }]}>2. Record & Scrape Data</Text>
-            </TouchableOpacity>
+            {!isRecording && !isProcessingAI && (
+              <TouchableOpacity
+                style={styles.optionButton}
+                onPress={startRecording}>
+                <Ionicons name="mic-outline" size={24} color="#FF3B30" />
+                <Text style={[styles.optionButtonText, { color: '#FF3B30' }]}>2. Record & Scrape Data</Text>
+              </TouchableOpacity>
+            )}
+
+            {isRecording && (
+              <TouchableOpacity
+                style={[styles.optionButton, { backgroundColor: '#FF3B30' }]}
+                onPress={stopRecordingAndProcess}>
+                <Ionicons name="stop-circle-outline" size={24} color="#fff" />
+                <Text style={[styles.optionButtonText, { color: '#fff' }]}>Stop Recording & Analyze</Text>
+              </TouchableOpacity>
+            )}
+
+            {isProcessingAI && (
+              <View style={[styles.optionButton, { justifyContent: 'center' }]}>
+                <Ionicons name="hardware-chip-outline" size={24} color="#007AFF" />
+                <Text style={[styles.optionButtonText, { color: '#007AFF' }]}>Analyzing Speech...</Text>
+              </View>
+            )}
             <TouchableOpacity style={styles.cancelOptionButton} onPress={() => setOptionsModalVisible(false)}>
               <Text style={styles.cancelOptionText}>Cancel</Text>
             </TouchableOpacity>
@@ -571,11 +761,11 @@ export default function HomeScreen() {
               </View>
 
               {/* Medicine name */}
-              <TextInput
-                style={styles.input}
-                placeholder="Name of medicine"
+              <MedicineAutocomplete
                 value={med.name}
-                onChangeText={(v) => updateMedicineField(idx, 'name', v)}
+                onSelect={(v) => updateMedicineField(idx, 'name', v)}
+                onSelectFull={(info) => applyMedicineInfo(idx, info)}
+                inputStyle={styles.input}
               />
 
               {/* Total pills prescribed – stepper */}
@@ -652,8 +842,8 @@ const fStyles = StyleSheet.create({
   stepper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E5EA', alignSelf: 'flex-start', marginBottom: 14, overflow: 'hidden' },
   stepBtn: { paddingHorizontal: 18, paddingVertical: 12 },
   stepValue: { fontSize: 16, fontWeight: '700', color: '#1C1C1E', minWidth: 90, textAlign: 'center' },
-  wheelRow:   { flexDirection: 'row', gap: 8, marginBottom: 14 },
-  wheelCol:   { flex: 1 },
+  wheelRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  wheelCol: { flex: 1 },
   wheelLabel: { fontSize: 9, fontWeight: '700', color: '#8E8E93', letterSpacing: 0.6, textTransform: 'uppercase', textAlign: 'center', marginBottom: 4 },
   scheduleSlot: { marginBottom: 12 },
   doseLabel: { fontSize: 12, fontWeight: '700', color: '#007AFF', marginBottom: 6 },
