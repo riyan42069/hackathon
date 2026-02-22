@@ -41,13 +41,7 @@
           }
         }
       ],
-      "expo-mail-composer",
-      [
-        "expo-notifications",
-        {
-          "sounds": []
-        }
-      ]
+      "expo-mail-composer"
     ],
     "experiments": {
       "typedRoutes": true,
