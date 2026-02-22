@@ -134,10 +134,6 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.hipaaRow}>
-            <Ionicons name="shield-checkmark-outline" size={16} color="#8E8E93" />
-            <Text style={styles.hipaaText}>Secure HIPAA-compliant environment</Text>
-          </View>
 
         </ScrollView>
       </KeyboardAvoidingView>
